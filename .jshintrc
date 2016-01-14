@@ -24,6 +24,7 @@
   "globals"   : {
     "console"     : true,
     "MediaSource" : true,
+    "videojs"     : true,
     "performance" : true,
     "crypto"      : true
   }

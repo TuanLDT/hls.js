@@ -56,8 +56,10 @@ class Hls {
           fragLoadingMaxRetry: 6,
           fragLoadingRetryDelay: 1000,
           fragLoadingLoopThreshold: 3,
-          // fpsDroppedMonitoringPeriod: 5000,
-          // fpsDroppedMonitoringThreshold: 0.2,
+
+          fpsDroppedMonitoringPeriod: 1000,
+          fpsDroppedMonitoringThreshold: 1,
+
           appendErrorMaxRetry: 3,
           loader: XhrLoader,
           fLoader: undefined,

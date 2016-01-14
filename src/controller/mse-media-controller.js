@@ -189,7 +189,7 @@ class MSEMediaController {
           // we are not at playback start, get next load level from level Controller
           level = hls.nextLoadLevel;
         }
-        var bufferInfo = this.bufferInfo(pos,0.3),
+        var bufferInfo = this.bufferInfo(pos,1),
             bufferLen = bufferInfo.len,
             bufferEnd = bufferInfo.end,
             fragPrevious = this.fragPrevious,
@@ -276,7 +276,11 @@ class MSEMediaController {
               frag = foundFrag;
               start = foundFrag.start;
               //logger.log('find SN matching with pos:' +  bufferEnd + ':' + frag.sn);
-              if (fragPrevious && frag.level === fragPrevious.level && frag.sn === fragPrevious.sn) {
+              /*if (fragPrevious && frag.level === fragPrevious.level && frag.sn === fragPrevious.sn - 1) {
+                frag = fragments[fragPrevious.sn + 1 - levelDetails.startSN];
+              }*/
+
+              if (fragPrevious && frag.level === fragPrevious.level && frag.sn === fragPrevious.sn || frag.lost) {
                 if (frag.sn < levelDetails.endSN) {
                   frag = fragments[frag.sn + 1 - levelDetails.startSN];
                   logger.log(`SN just loaded, load next one: ${frag.sn}`);
@@ -390,6 +394,14 @@ class MSEMediaController {
         if(!retryDate || (now >= retryDate) || isSeeking) {
           logger.log(`mediaController: retryDate reached, switch back to IDLE state`);
           this.state = State.IDLE;
+        }
+
+        var fragCurrent = this.fragCurrent;
+
+        if(fragCurrent.level === 0 ) {
+          fragCurrent.lost = true;
+          this.state = State.IDLE;
+          console.log('Frage load error');
         }
         break;
       case State.PARSING:
@@ -544,7 +556,7 @@ class MSEMediaController {
         bufferEnd = end + maxHoleDuration;
         bufferLen = bufferEnd - pos;
       } else if ((pos + maxHoleDuration) < start) {
-        bufferStartNext = start;
+        bufferStartNext = bufferStartNext || start;
       }
     }
     return {len: bufferLen, start: bufferStart, end: bufferEnd, nextStart : bufferStartNext};
@@ -619,10 +631,13 @@ class MSEMediaController {
       */
       if(currentTime > video.playbackRate*this.lastCurrentTime) {
         this.lastCurrentTime = currentTime;
+        console.log('check point 1');
       }
       if (this.isBuffered(currentTime)) {
+        console.log('check point 2');
         rangeCurrent = this.getBufferRange(currentTime);
       } else if (this.isBuffered(currentTime + 0.1)) {
+        console.log('check point 3');
         /* ensure that FRAG_CHANGED event is triggered at startup,
           when first video frame is displayed and playback is paused.
           add a tolerance of 100ms, in case current position is not buffered,
@@ -631,6 +646,7 @@ class MSEMediaController {
         rangeCurrent = this.getBufferRange(currentTime + 0.1);
       }
       if (rangeCurrent) {
+        console.log('check point 4');
         var fragPlaying = rangeCurrent.frag;
         if (fragPlaying !== this.fragPlaying) {
           this.fragPlaying = fragPlaying;
@@ -867,6 +883,7 @@ class MSEMediaController {
   }
 
   onMediaSeeking() {
+    console.log('seeking');
     if (this.state === State.FRAG_LOADING) {
       // check if currently loaded fragment is inside buffer.
       //if outside, cancel fragment loading, otherwise do nothing
@@ -1100,7 +1117,7 @@ class MSEMediaController {
       var level = this.levels[this.level],
           frag = this.fragCurrent;
       logger.log(`parsed ${data.type},PTS:[${data.startPTS.toFixed(3)},${data.endPTS.toFixed(3)}],DTS:[${data.startDTS.toFixed(3)}/${data.endDTS.toFixed(3)}],nb:${data.nb}`);
-      var drift = LevelHelper.updateFragPTS(level.details,frag.sn,data.startPTS,data.endPTS);
+      var drift = LevelHelper.updateFragPTS(level.details,frag.sn,data.startPTS,data.endPTS, data.startDTS, data.endDTS);
       this.hls.trigger(Event.LEVEL_PTS_UPDATED, {details: level.details, level: this.level, drift: drift});
 
       this.mp4segments.push({type: data.type, data: data.moof});
@@ -1177,7 +1194,8 @@ class MSEMediaController {
         stats.tbuffered = performance.now();
         this.fragLastKbps = Math.round(8 * stats.length / (stats.tbuffered - stats.tfirst));
         this.hls.trigger(Event.FRAG_BUFFERED, {stats: stats, frag: frag});
-        logger.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
+        //logger.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
+        console.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
         this.state = State.IDLE;
       }
     }
@@ -1186,6 +1204,8 @@ class MSEMediaController {
 
 _checkBuffer() {
     var media = this.media;
+    var self = this;
+    this.isLowSeek = typeof this.isLowSeek !== 'undefined'? this.isLowSeek : false;
     if(media) {
       // compare readyState
       var readyState = media.readyState;
@@ -1201,14 +1221,14 @@ _checkBuffer() {
         } else {
           var currentTime = media.currentTime,
               bufferInfo = this.bufferInfo(currentTime,0),
-              isPlaying = !(media.paused || media.ended || media.seeking || readyState < 3),
-              jumpThreshold = 0.2;
+              isPlaying = !(media.paused || media.ended || readyState < 3),
+              jumpThreshold = 1;
 
           // check buffer upfront
           // if less than 200ms is buffered, and media is playing but playhead is not moving,
           // and we have a new buffer range available upfront, let's seek to that one
           if(bufferInfo.len <= jumpThreshold) {
-            if(currentTime > media.playbackRate*this.lastCurrentTime || !isPlaying) {
+            if(isPlaying) {
               // playhead moving or media not playing
               jumpThreshold = 0;
             } else {
@@ -1219,13 +1239,19 @@ _checkBuffer() {
               // no buffer available @ currentTime, check if next buffer is close (more than 5ms diff but within a 300 ms range)
               var nextBufferStart = bufferInfo.nextStart, delta = nextBufferStart-currentTime;
               if(nextBufferStart &&
-                 (delta < 0.3) &&
+                 (delta < 2) &&
                  (delta > 0.005)  &&
-                 !media.seeking) {
+                 (!media.seeking || self.isLowSeek)) {
                 // next buffer is close ! adjust currentTime to nextBufferStart
                 // this will ensure effective video decoding
-                logger.log(`adjust currentTime from ${currentTime} to ${nextBufferStart}`);
+                self.isJumping = true;
+                console.log(`adjust currentTime from ${currentTime} to ${nextBufferStart}`);
                 media.currentTime = nextBufferStart;
+                setTimeout(function () {
+                  if (media.seeking) {
+                    self.isLowSeek = true;
+                  }
+                }, 100);
               }
             }
           }

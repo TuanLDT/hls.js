@@ -312,15 +312,20 @@ module.exports = function (fn) {
     var keys = [];
     var wkey;
     var cacheKeys = Object.keys(cache);
-    
+
     for (var i = 0, l = cacheKeys.length; i < l; i++) {
         var key = cacheKeys[i];
-        if (cache[key].exports === fn) {
+        var exp = cache[key].exports;
+        // Using babel as a transpiler to use esmodule, the export will always
+        // be an object with the default export as a property of it. To ensure
+        // the existing api and babel esmodule exports are both supported we
+        // check for both
+        if (exp === fn || exp.default === fn) {
             wkey = key;
             break;
         }
     }
-    
+
     if (!wkey) {
         wkey = Math.floor(Math.pow(16, 8) * Math.random()).toString(16);
         var wcache = {};
@@ -334,13 +339,18 @@ module.exports = function (fn) {
         ];
     }
     var skey = Math.floor(Math.pow(16, 8) * Math.random()).toString(16);
-    
+
     var scache = {}; scache[wkey] = wkey;
     sources[skey] = [
-        Function(['require'],'require(' + stringify(wkey) + ')(self)'),
+        Function(['require'], (
+            // try to call default if defined to also support babel esmodule
+            // exports
+            'var f = require(' + stringify(wkey) + ');' +
+            '(f.default ? f.default : f)(self);'
+        )),
         scache
     ];
-    
+
     var src = '(' + bundleFn + ')({'
         + Object.keys(sources).map(function (key) {
             return stringify(key) + ':['
@@ -350,9 +360,9 @@ module.exports = function (fn) {
         }).join(',')
         + '},{},[' + stringify(skey) + '])'
     ;
-    
+
     var URL = window.URL || window.webkitURL || window.mozURL || window.msURL;
-    
+
     return new Worker(URL.createObjectURL(
         new Blob([src], { type: 'text/javascript' })
     ));
@@ -1001,7 +1011,7 @@ var MSEMediaController = (function () {
             // we are not at playback start, get next load level from level Controller
             level = hls.nextLoadLevel;
           }
-          var bufferInfo = this.bufferInfo(pos, 0.3),
+          var bufferInfo = this.bufferInfo(pos, 1),
               bufferLen = bufferInfo.len,
               bufferEnd = bufferInfo.end,
               fragPrevious = this.fragPrevious,
@@ -1087,7 +1097,11 @@ var MSEMediaController = (function () {
                 _frag = foundFrag;
                 start = foundFrag.start;
                 //logger.log('find SN matching with pos:' +  bufferEnd + ':' + frag.sn);
-                if (fragPrevious && _frag.level === fragPrevious.level && _frag.sn === fragPrevious.sn) {
+                /*if (fragPrevious && frag.level === fragPrevious.level && frag.sn === fragPrevious.sn - 1) {
+                  frag = fragments[fragPrevious.sn + 1 - levelDetails.startSN];
+                }*/
+
+                if (fragPrevious && _frag.level === fragPrevious.level && _frag.sn === fragPrevious.sn || _frag.lost) {
                   if (_frag.sn < levelDetails.endSN) {
                     _frag = fragments[_frag.sn + 1 - levelDetails.startSN];
                     _utilsLogger.logger.log('SN just loaded, load next one: ' + _frag.sn);
@@ -1202,6 +1216,14 @@ var MSEMediaController = (function () {
           if (!retryDate || now >= retryDate || isSeeking) {
             _utilsLogger.logger.log('mediaController: retryDate reached, switch back to IDLE state');
             this.state = State.IDLE;
+          }
+
+          var fragCurrent = this.fragCurrent;
+
+          if (fragCurrent.level === 0) {
+            fragCurrent.lost = true;
+            this.state = State.IDLE;
+            console.log('Frage load error');
           }
           break;
         case State.PARSING:
@@ -1362,7 +1384,7 @@ var MSEMediaController = (function () {
           bufferEnd = end + maxHoleDuration;
           bufferLen = bufferEnd - pos;
         } else if (pos + maxHoleDuration < start) {
-          bufferStartNext = start;
+          bufferStartNext = bufferStartNext || start;
         }
       }
       return { len: bufferLen, start: bufferStart, end: bufferEnd, nextStart: bufferStartNext };
@@ -1416,10 +1438,13 @@ var MSEMediaController = (function () {
         */
         if (currentTime > video.playbackRate * this.lastCurrentTime) {
           this.lastCurrentTime = currentTime;
+          console.log('check point 1');
         }
         if (this.isBuffered(currentTime)) {
+          console.log('check point 2');
           rangeCurrent = this.getBufferRange(currentTime);
         } else if (this.isBuffered(currentTime + 0.1)) {
+          console.log('check point 3');
           /* ensure that FRAG_CHANGED event is triggered at startup,
             when first video frame is displayed and playback is paused.
             add a tolerance of 100ms, in case current position is not buffered,
@@ -1428,6 +1453,7 @@ var MSEMediaController = (function () {
           rangeCurrent = this.getBufferRange(currentTime + 0.1);
         }
         if (rangeCurrent) {
+          console.log('check point 4');
           var fragPlaying = rangeCurrent.frag;
           if (fragPlaying !== this.fragPlaying) {
             this.fragPlaying = fragPlaying;
@@ -1677,6 +1703,7 @@ var MSEMediaController = (function () {
   }, {
     key: 'onMediaSeeking',
     value: function onMediaSeeking() {
+      console.log('seeking');
       if (this.state === State.FRAG_LOADING) {
         // check if currently loaded fragment is inside buffer.
         //if outside, cancel fragment loading, otherwise do nothing
@@ -1916,7 +1943,7 @@ var MSEMediaController = (function () {
         var level = this.levels[this.level],
             frag = this.fragCurrent;
         _utilsLogger.logger.log('parsed ' + data.type + ',PTS:[' + data.startPTS.toFixed(3) + ',' + data.endPTS.toFixed(3) + '],DTS:[' + data.startDTS.toFixed(3) + '/' + data.endDTS.toFixed(3) + '],nb:' + data.nb);
-        var drift = _helperLevelHelper2['default'].updateFragPTS(level.details, frag.sn, data.startPTS, data.endPTS);
+        var drift = _helperLevelHelper2['default'].updateFragPTS(level.details, frag.sn, data.startPTS, data.endPTS, data.startDTS, data.endDTS);
         this.hls.trigger(_events2['default'].LEVEL_PTS_UPDATED, { details: level.details, level: this.level, drift: drift });
 
         this.mp4segments.push({ type: data.type, data: data.moof });
@@ -1997,7 +2024,8 @@ var MSEMediaController = (function () {
           stats.tbuffered = performance.now();
           this.fragLastKbps = Math.round(8 * stats.length / (stats.tbuffered - stats.tfirst));
           this.hls.trigger(_events2['default'].FRAG_BUFFERED, { stats: stats, frag: frag });
-          _utilsLogger.logger.log('media buffered : ' + this.timeRangesToString(this.media.buffered));
+          //logger.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
+          console.log('media buffered : ' + this.timeRangesToString(this.media.buffered));
           this.state = State.IDLE;
         }
       }
@@ -2007,6 +2035,8 @@ var MSEMediaController = (function () {
     key: '_checkBuffer',
     value: function _checkBuffer() {
       var media = this.media;
+      var self = this;
+      this.isLowSeek = typeof this.isLowSeek !== 'undefined' ? this.isLowSeek : false;
       if (media) {
         // compare readyState
         var readyState = media.readyState;
@@ -2022,14 +2052,14 @@ var MSEMediaController = (function () {
           } else {
             var currentTime = media.currentTime,
                 bufferInfo = this.bufferInfo(currentTime, 0),
-                isPlaying = !(media.paused || media.ended || media.seeking || readyState < 3),
-                jumpThreshold = 0.2;
+                isPlaying = !(media.paused || media.ended || readyState < 3),
+                jumpThreshold = 1;
 
             // check buffer upfront
             // if less than 200ms is buffered, and media is playing but playhead is not moving,
             // and we have a new buffer range available upfront, let's seek to that one
             if (bufferInfo.len <= jumpThreshold) {
-              if (currentTime > media.playbackRate * this.lastCurrentTime || !isPlaying) {
+              if (isPlaying) {
                 // playhead moving or media not playing
                 jumpThreshold = 0;
               } else {
@@ -2040,11 +2070,17 @@ var MSEMediaController = (function () {
                 // no buffer available @ currentTime, check if next buffer is close (more than 5ms diff but within a 300 ms range)
                 var nextBufferStart = bufferInfo.nextStart,
                     delta = nextBufferStart - currentTime;
-                if (nextBufferStart && delta < 0.3 && delta > 0.005 && !media.seeking) {
+                if (nextBufferStart && delta < 2 && delta > 0.005 && (!media.seeking || self.isLowSeek)) {
                   // next buffer is close ! adjust currentTime to nextBufferStart
                   // this will ensure effective video decoding
-                  _utilsLogger.logger.log('adjust currentTime from ' + currentTime + ' to ' + nextBufferStart);
+                  self.isJumping = true;
+                  console.log('adjust currentTime from ' + currentTime + ' to ' + nextBufferStart);
                   media.currentTime = nextBufferStart;
+                  setTimeout(function () {
+                    if (media.seeking) {
+                      self.isLowSeek = true;
+                    }
+                  }, 100);
                 }
               }
             }
@@ -4587,7 +4623,7 @@ var LevelHelper = (function () {
     }
   }, {
     key: 'updateFragPTS',
-    value: function updateFragPTS(details, sn, startPTS, endPTS) {
+    value: function updateFragPTS(details, sn, startPTS, endPTS, startDTS, endDTS) {
       var fragIdx, fragments, frag, i;
       // exit if sn out of range
       if (sn < details.startSN || sn > details.endSN) {
@@ -4599,12 +4635,18 @@ var LevelHelper = (function () {
       if (!isNaN(frag.startPTS)) {
         startPTS = Math.min(startPTS, frag.startPTS);
         endPTS = Math.max(endPTS, frag.endPTS);
+
+        startDTS = Math.min(startDTS, frag.startDTS);
+        endDTS = Math.max(endDTS, frag.endDTS);
       }
 
       var drift = startPTS - frag.start;
 
       frag.start = frag.startPTS = startPTS;
       frag.endPTS = endPTS;
+
+      frag.startDTS = startDTS;
+      frag.endDTS = endDTS;
       frag.duration = endPTS - startPTS;
       // adjust fragment PTS/duration from seqnum-1 to frag 0
       for (i = fragIdx; i > 0; i--) {
@@ -4761,8 +4803,10 @@ var Hls = (function () {
           fragLoadingMaxRetry: 6,
           fragLoadingRetryDelay: 1000,
           fragLoadingLoopThreshold: 3,
-          // fpsDroppedMonitoringPeriod: 5000,
-          // fpsDroppedMonitoringThreshold: 0.2,
+
+          fpsDroppedMonitoringPeriod: 1000,
+          fpsDroppedMonitoringThreshold: 1,
+
           appendErrorMaxRetry: 3,
           loader: _utilsXhrLoader2['default'],
           fLoader: undefined,
@@ -6280,7 +6324,7 @@ var MP4Remuxer = (function () {
       this.nextAvcDts = dtsnorm + mp4Sample.duration * pes2mp4ScaleFactor;
       track.len = 0;
       track.nbNalu = 0;
-      if (navigator.userAgent.toLowerCase().indexOf('chrome') > -1) {
+      if (/chrome|firefox/.test(navigator.userAgent.toLowerCase())) {
         // chrome workaround, mark first sample as being a Random Access Point to avoid sourcebuffer append issue
         // https://code.google.com/p/chromium/issues/detail?id=229412
         samples[0].flags.dependsOn = 2;

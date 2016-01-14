@@ -223,7 +223,7 @@ $(document).ready(function() {
   var video = $('#video')[0];
   video.volume = 0.05;
 
-  loadStream(decodeURIComponent(getURLParam('src','http://www.streambox.fr/playlists/x36xhzz/x36xhzz.m3u8')));
+  loadStream(decodeURIComponent(getURLParam('src','https://vhosting.vcmedia.vn/vtv/1wspafjvpcm2t5emagq9roxedfhkdz/2016/01/09/0901-vtv-ket-noi-1452320440286-1c9af.mp4/master.m3u8')));
 
 
   function loadStream(url) {
@@ -248,7 +248,8 @@ $(document).ready(function() {
       $("#HlsStatus").text('loading ' + url);
        events = { url : url, t0 : performance.now(), load : [], buffer : [], video : [], level : [], bitrate : []};
        recoverDecodingErrorDate = recoverSwapAudioCodecDate = null;
-       hls = new Hls({debug:true, enableWorker : enableWorker});
+       //hls = new Hls({debug:true, enableWorker : enableWorker});
+       hls = new Hls({debug:false, maxMaxBufferLength: 30});
        $("#HlsStatus").text('loading manifest and attaching video element...');
        hls.loadSource(url);
        hls.autoLevelCapping = levelCapping;

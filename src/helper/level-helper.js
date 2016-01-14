@@ -56,7 +56,7 @@ class LevelHelper {
     return;
   }
 
-  static updateFragPTS(details,sn,startPTS,endPTS) {
+  static updateFragPTS(details,sn,startPTS,endPTS, startDTS, endDTS) {
     var fragIdx, fragments, frag, i;
     // exit if sn out of range
     if (sn < details.startSN || sn > details.endSN) {
@@ -68,12 +68,18 @@ class LevelHelper {
     if(!isNaN(frag.startPTS)) {
       startPTS = Math.min(startPTS,frag.startPTS);
       endPTS = Math.max(endPTS, frag.endPTS);
+
+      startDTS = Math.min(startDTS,frag.startDTS);
+      endDTS = Math.max(endDTS, frag.endDTS);
     }
 
     var drift = startPTS - frag.start;
 
     frag.start = frag.startPTS = startPTS;
     frag.endPTS = endPTS;
+
+    frag.startDTS = startDTS;
+    frag.endDTS = endDTS;
     frag.duration = endPTS - startPTS;
     // adjust fragment PTS/duration from seqnum-1 to frag 0
     for(i = fragIdx ; i > 0 ; i--) {
