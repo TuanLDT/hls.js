@@ -30,6 +30,7 @@ class MSEMediaController {
     this.audioCodecSwap = false;
     this.hls = hls;
     this.ticks = 0;
+    this.seekState = 0;
     // Source Buffer listeners
     this.onsbue = this.onSBUpdateEnd.bind(this);
     this.onsbe  = this.onSBUpdateError.bind(this);
@@ -631,13 +632,10 @@ class MSEMediaController {
       */
       if(currentTime > video.playbackRate*this.lastCurrentTime) {
         this.lastCurrentTime = currentTime;
-        console.log('check point 1');
       }
       if (this.isBuffered(currentTime)) {
-        console.log('check point 2');
         rangeCurrent = this.getBufferRange(currentTime);
       } else if (this.isBuffered(currentTime + 0.1)) {
-        console.log('check point 3');
         /* ensure that FRAG_CHANGED event is triggered at startup,
           when first video frame is displayed and playback is paused.
           add a tolerance of 100ms, in case current position is not buffered,
@@ -646,7 +644,6 @@ class MSEMediaController {
         rangeCurrent = this.getBufferRange(currentTime + 0.1);
       }
       if (rangeCurrent) {
-        console.log('check point 4');
         var fragPlaying = rangeCurrent.frag;
         if (fragPlaying !== this.fragPlaying) {
           this.fragPlaying = fragPlaying;
@@ -883,7 +880,9 @@ class MSEMediaController {
   }
 
   onMediaSeeking() {
-    console.log('seeking');
+    //console.log('seeking');
+    this.seekState = 1;
+    setTimeout(this._stateSeekLow.bind(this), 300);
     if (this.state === State.FRAG_LOADING) {
       // check if currently loaded fragment is inside buffer.
       //if outside, cancel fragment loading, otherwise do nothing
@@ -914,6 +913,7 @@ class MSEMediaController {
 
   onMediaSeeked() {
     // tick to speed up FRAGMENT_PLAYING triggering
+    this.seekState = 0;
     this.tick();
   }
 
@@ -1038,8 +1038,11 @@ class MSEMediaController {
             level = fragCurrent.level,
             sn = fragCurrent.sn,
             audioCodec = currentLevel.audioCodec;
-        if(audioCodec && this.audioCodecSwap) {
+        if(this.audioCodecSwap) {
           logger.log('swapping playlist audio codec');
+          if(audioCodec === undefined) {
+            audioCodec = this.lastAudioCodec;
+          }
           if(audioCodec.indexOf('mp4a.40.5') !==-1) {
             audioCodec = 'mp4a.40.2';
           } else {
@@ -1058,6 +1061,7 @@ class MSEMediaController {
       // check if codecs have been explicitely defined in the master playlist for this level;
       // if yes use these ones instead of the ones parsed from the demux
       var audioCodec = this.levels[this.level].audioCodec, videoCodec = this.levels[this.level].videoCodec, sb;
+      this.lastAudioCodec = data.audioCodec;
       if(audioCodec && this.audioCodecSwap) {
         logger.log('swapping playlist audio codec');
         if(audioCodec.indexOf('mp4a.40.5') !==-1) {
@@ -1204,8 +1208,9 @@ class MSEMediaController {
 
 _checkBuffer() {
     var media = this.media;
-    var self = this;
-    this.isLowSeek = typeof this.isLowSeek !== 'undefined'? this.isLowSeek : false;
+    var currentTime;
+    var bufferInfo;
+
     if(media) {
       // compare readyState
       var readyState = media.readyState;
@@ -1219,9 +1224,10 @@ _checkBuffer() {
             this.seekAfterBuffered = undefined;
           }
         } else {
-          var currentTime = media.currentTime,
-              bufferInfo = this.bufferInfo(currentTime,0),
-              isPlaying = !(media.paused || media.ended || readyState < 3),
+          currentTime= media.currentTime;
+          bufferInfo = this.bufferInfo(currentTime,0);
+
+          var isPlaying = !(media.paused || media.ended || readyState < 3),
               jumpThreshold = 1;
 
           // check buffer upfront
@@ -1240,23 +1246,47 @@ _checkBuffer() {
               var nextBufferStart = bufferInfo.nextStart, delta = nextBufferStart-currentTime;
               if(nextBufferStart &&
                  (delta < 2) &&
-                 (delta > 0.005)  &&
-                 (!media.seeking || self.isLowSeek)) {
+                 (delta > 0.005)) {
                 // next buffer is close ! adjust currentTime to nextBufferStart
                 // this will ensure effective video decoding
-                self.isJumping = true;
-                console.log(`adjust currentTime from ${currentTime} to ${nextBufferStart}`);
+              
                 media.currentTime = nextBufferStart;
-                setTimeout(function () {
-                  if (media.seeking) {
-                    self.isLowSeek = true;
-                  }
-                }, 100);
+                this.seekState = 1;
+                return;
               }
             }
           }
         }
       }
+
+      if (readyState < 3 && this.seekState !== 1) {
+        currentTime = media.currentTime;
+        bufferInfo = this.bufferInfo(currentTime,0);
+
+        if (this.isBuffered(currentTime)) {
+         this._seekSmall();
+        }
+      }
+    }
+  }
+
+  _stateSeekLow() {
+    if (this.seekState === 1) {
+      this.seekState = 2;
+    }
+  }
+
+  _seekSmall(second = 0.1) {
+    var self = this;
+    if (!this.seekSmall) {
+      self.seekSmall = setTimeout(function() {
+        var media = self.media;
+        var currentTime = media.currentTime;
+        media.currentTime = currentTime + second;
+        self.seekSmall = null;
+        this.seekState = 1;
+        //console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
+      }, 100);
     }
   }
 

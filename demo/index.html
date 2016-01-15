@@ -249,7 +249,7 @@ $(document).ready(function() {
        events = { url : url, t0 : performance.now(), load : [], buffer : [], video : [], level : [], bitrate : []};
        recoverDecodingErrorDate = recoverSwapAudioCodecDate = null;
        //hls = new Hls({debug:true, enableWorker : enableWorker});
-       hls = new Hls({debug:false, maxMaxBufferLength: 30});
+       hls = new Hls({debug:false, maxMaxBufferLength: 4});
        $("#HlsStatus").text('loading manifest and attaching video element...');
        hls.loadSource(url);
        hls.autoLevelCapping = levelCapping;
@@ -719,14 +719,6 @@ function timeRangesToString(r) {
       events.buffer.push(event);
       refreshCanvas();
 
-      var decodedFrames, droppedFrames;
-      if(navigator.userAgent.toLowerCase().indexOf('firefox') !== -1) {
-        decodedFrames = v.mozDecodedFrames;
-        droppedFrames = v.mozParsedFrames-v.mozPresentedFrames;
-      } else {
-        decodedFrames = v.webkitDecodedFrameCount;
-        droppedFrames = v.webkitDroppedFrameCount;
-      }
       var log = "Duration:"
               + v.duration + "<br>"
               + "Buffered:"
@@ -734,11 +726,13 @@ function timeRangesToString(r) {
               + "Seekable:"
               + timeRangesToString(v.seekable) + "<br>"
               + "Played:"
-              + timeRangesToString(v.played) + "<br>"
-              + "Decoded Frames:"
-              + decodedFrames + "<br>"
-              + "Dropped Frames:"
-              + droppedFrames + "<br>";
+              + timeRangesToString(v.played) + "<br>";
+
+      var videoPlaybackQuality = v.getVideoPlaybackQuality();
+      if(videoPlaybackQuality) {
+        log+="Dropped Frames:"+ videoPlaybackQuality.droppedVideoFrames + "<br>";
+        log+="Corrupted Frames:"+ videoPlaybackQuality.corruptedVideoFrames + "<br>";
+      }
       $("#buffered_log").html(log);
       $("#HlsStats").text(JSON.stringify(sortObject(stats),null,"\t"));
       ctx.fillStyle = "blue";
@@ -956,6 +950,21 @@ function timeRangesToString(r) {
   }
 
   </script>
+
+  <script type="text/javascript">
+    var _paq = _paq || [];
+    _paq.push(['trackPageView']);
+    _paq.push(['enableLinkTracking']);
+    (function() {
+      var u="//va.vietidv2.net/";
+      _paq.push(['setTrackerUrl', u+'piwik.php']);
+      _paq.push(['setSiteId', 3]);
+      var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+      g.type='text/javascript'; g.async=true; g.defer=true; g.src=u+'piwik.js'; s.parentNode.insertBefore(g,s);
+    })();
+  </script>
+  <noscript><p><img src="//va.vietidv2.net/piwik.php?idsite=3" style="border:0;" alt="" /></p></noscript>
+  <!-- End Piwik Code -->
 </body>
 
 </html>

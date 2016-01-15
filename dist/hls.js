@@ -843,6 +843,7 @@ var MSEMediaController = (function () {
     this.audioCodecSwap = false;
     this.hls = hls;
     this.ticks = 0;
+    this.seekState = 0;
     // Source Buffer listeners
     this.onsbue = this.onSBUpdateEnd.bind(this);
     this.onsbe = this.onSBUpdateError.bind(this);
@@ -1438,13 +1439,10 @@ var MSEMediaController = (function () {
         */
         if (currentTime > video.playbackRate * this.lastCurrentTime) {
           this.lastCurrentTime = currentTime;
-          console.log('check point 1');
         }
         if (this.isBuffered(currentTime)) {
-          console.log('check point 2');
           rangeCurrent = this.getBufferRange(currentTime);
         } else if (this.isBuffered(currentTime + 0.1)) {
-          console.log('check point 3');
           /* ensure that FRAG_CHANGED event is triggered at startup,
             when first video frame is displayed and playback is paused.
             add a tolerance of 100ms, in case current position is not buffered,
@@ -1453,7 +1451,6 @@ var MSEMediaController = (function () {
           rangeCurrent = this.getBufferRange(currentTime + 0.1);
         }
         if (rangeCurrent) {
-          console.log('check point 4');
           var fragPlaying = rangeCurrent.frag;
           if (fragPlaying !== this.fragPlaying) {
             this.fragPlaying = fragPlaying;
@@ -1703,7 +1700,9 @@ var MSEMediaController = (function () {
   }, {
     key: 'onMediaSeeking',
     value: function onMediaSeeking() {
-      console.log('seeking');
+      //console.log('seeking');
+      this.seekState = 1;
+      setTimeout(this._stateSeekLow.bind(this), 300);
       if (this.state === State.FRAG_LOADING) {
         // check if currently loaded fragment is inside buffer.
         //if outside, cancel fragment loading, otherwise do nothing
@@ -1735,6 +1734,7 @@ var MSEMediaController = (function () {
     key: 'onMediaSeeked',
     value: function onMediaSeeked() {
       // tick to speed up FRAGMENT_PLAYING triggering
+      this.seekState = 0;
       this.tick();
     }
   }, {
@@ -1863,8 +1863,11 @@ var MSEMediaController = (function () {
               level = fragCurrent.level,
               sn = fragCurrent.sn,
               audioCodec = currentLevel.audioCodec;
-          if (audioCodec && this.audioCodecSwap) {
+          if (this.audioCodecSwap) {
             _utilsLogger.logger.log('swapping playlist audio codec');
+            if (audioCodec === undefined) {
+              audioCodec = this.lastAudioCodec;
+            }
             if (audioCodec.indexOf('mp4a.40.5') !== -1) {
               audioCodec = 'mp4a.40.2';
             } else {
@@ -1886,6 +1889,7 @@ var MSEMediaController = (function () {
         var audioCodec = this.levels[this.level].audioCodec,
             videoCodec = this.levels[this.level].videoCodec,
             sb;
+        this.lastAudioCodec = data.audioCodec;
         if (audioCodec && this.audioCodecSwap) {
           _utilsLogger.logger.log('swapping playlist audio codec');
           if (audioCodec.indexOf('mp4a.40.5') !== -1) {
@@ -2035,8 +2039,9 @@ var MSEMediaController = (function () {
     key: '_checkBuffer',
     value: function _checkBuffer() {
       var media = this.media;
-      var self = this;
-      this.isLowSeek = typeof this.isLowSeek !== 'undefined' ? this.isLowSeek : false;
+      var currentTime;
+      var bufferInfo;
+
       if (media) {
         // compare readyState
         var readyState = media.readyState;
@@ -2050,9 +2055,10 @@ var MSEMediaController = (function () {
               this.seekAfterBuffered = undefined;
             }
           } else {
-            var currentTime = media.currentTime,
-                bufferInfo = this.bufferInfo(currentTime, 0),
-                isPlaying = !(media.paused || media.ended || readyState < 3),
+            currentTime = media.currentTime;
+            bufferInfo = this.bufferInfo(currentTime, 0);
+
+            var isPlaying = !(media.paused || media.ended || readyState < 3),
                 jumpThreshold = 1;
 
             // check buffer upfront
@@ -2070,22 +2076,51 @@ var MSEMediaController = (function () {
                 // no buffer available @ currentTime, check if next buffer is close (more than 5ms diff but within a 300 ms range)
                 var nextBufferStart = bufferInfo.nextStart,
                     delta = nextBufferStart - currentTime;
-                if (nextBufferStart && delta < 2 && delta > 0.005 && (!media.seeking || self.isLowSeek)) {
+                if (nextBufferStart && delta < 2 && delta > 0.005) {
                   // next buffer is close ! adjust currentTime to nextBufferStart
                   // this will ensure effective video decoding
-                  self.isJumping = true;
-                  console.log('adjust currentTime from ' + currentTime + ' to ' + nextBufferStart);
+
                   media.currentTime = nextBufferStart;
-                  setTimeout(function () {
-                    if (media.seeking) {
-                      self.isLowSeek = true;
-                    }
-                  }, 100);
+                  this.seekState = 1;
+                  return;
                 }
               }
             }
           }
         }
+
+        if (readyState < 3 && this.seekState !== 1) {
+          currentTime = media.currentTime;
+          bufferInfo = this.bufferInfo(currentTime, 0);
+
+          if (this.isBuffered(currentTime)) {
+            this._seekSmall();
+          }
+        }
+      }
+    }
+  }, {
+    key: '_stateSeekLow',
+    value: function _stateSeekLow() {
+      if (this.seekState === 1) {
+        this.seekState = 2;
+      }
+    }
+  }, {
+    key: '_seekSmall',
+    value: function _seekSmall() {
+      var second = arguments.length <= 0 || arguments[0] === undefined ? 0.1 : arguments[0];
+
+      var self = this;
+      if (!this.seekSmall) {
+        self.seekSmall = setTimeout(function () {
+          var media = self.media;
+          var currentTime = media.currentTime;
+          media.currentTime = currentTime + second;
+          self.seekSmall = null;
+          this.seekState = 1;
+          //console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
+        }, 100);
       }
     }
   }, {
@@ -4332,11 +4367,12 @@ var TSDemuxer = (function () {
           duration = this._duration,
           audioCodec = this.audioCodec,
           config,
-          adtsFrameSize,
-          adtsStartOffset,
-          adtsHeaderLen,
+          frameLength,
+          frameDuration,
+          frameIndex,
+          offset,
+          headerLength,
           stamp,
-          nbSamples,
           len,
           aacSample;
       if (this.aacOverFlow) {
@@ -4346,16 +4382,16 @@ var TSDemuxer = (function () {
         data = tmp;
       }
       // look for ADTS header (0xFFFx)
-      for (adtsStartOffset = startOffset, len = data.length; adtsStartOffset < len - 1; adtsStartOffset++) {
-        if (data[adtsStartOffset] === 0xff && (data[adtsStartOffset + 1] & 0xf0) === 0xf0) {
+      for (offset = startOffset, len = data.length; offset < len - 1; offset++) {
+        if (data[offset] === 0xff && (data[offset + 1] & 0xf0) === 0xf0) {
           break;
         }
       }
       // if ADTS header does not start straight from the beginning of the PES payload, raise an error
-      if (adtsStartOffset) {
+      if (offset) {
         var reason, fatal;
-        if (adtsStartOffset < len - 1) {
-          reason = 'AAC PES did not start with ADTS header,offset:' + adtsStartOffset;
+        if (offset < len - 1) {
+          reason = 'AAC PES did not start with ADTS header,offset:' + offset;
           fatal = false;
         } else {
           reason = 'no ADTS header found in AAC PES';
@@ -4367,37 +4403,36 @@ var TSDemuxer = (function () {
         }
       }
       if (!track.audiosamplerate) {
-        config = _adts2['default'].getAudioConfig(this.observer, data, adtsStartOffset, audioCodec);
+        config = _adts2['default'].getAudioConfig(this.observer, data, offset, audioCodec);
         track.config = config.config;
         track.audiosamplerate = config.samplerate;
         track.channelCount = config.channelCount;
         track.codec = config.codec;
         track.timescale = this.remuxer.timescale;
-        track.duration = this.remuxer.timescale * duration;
+        track.duration = track.timescale * duration;
         _utilsLogger.logger.log('parsed codec:' + track.codec + ',rate:' + config.samplerate + ',nb channel:' + config.channelCount);
       }
-      nbSamples = 0;
-      while (adtsStartOffset + 5 < len) {
+      frameIndex = 0;
+      frameDuration = 1024 * 90000 / track.audiosamplerate;
+      while (offset + 5 < len) {
+        // The protection skip bit tells us if we have 2 bytes of CRC data at the end of the ADTS header
+        headerLength = !!(data[offset + 1] & 0x01) ? 7 : 9;
         // retrieve frame size
-        adtsFrameSize = (data[adtsStartOffset + 3] & 0x03) << 11;
-        // byte 4
-        adtsFrameSize |= data[adtsStartOffset + 4] << 3;
-        // byte 5
-        adtsFrameSize |= (data[adtsStartOffset + 5] & 0xE0) >>> 5;
-        adtsHeaderLen = !!(data[adtsStartOffset + 1] & 0x01) ? 7 : 9;
-        adtsFrameSize -= adtsHeaderLen;
-        stamp = Math.round(pts + nbSamples * 1024 * 90000 / track.audiosamplerate);
+        frameLength = (data[offset + 3] & 0x03) << 11 | data[offset + 4] << 3 | (data[offset + 5] & 0xE0) >>> 5;
+        frameLength -= headerLength;
+        stamp = Math.round(pts + frameIndex * frameDuration);
         //stamp = pes.pts;
-        //console.log('AAC frame, offset/length/pts:' + (adtsStartOffset+7) + '/' + adtsFrameSize + '/' + stamp.toFixed(0));
-        if (adtsFrameSize > 0 && adtsStartOffset + adtsHeaderLen + adtsFrameSize <= len) {
-          aacSample = { unit: data.subarray(adtsStartOffset + adtsHeaderLen, adtsStartOffset + adtsHeaderLen + adtsFrameSize), pts: stamp, dts: stamp };
+
+        //console.log('AAC frame, offset/length/pts:' + (offset+headerLength) + '/' + frameLength + '/' + stamp.toFixed(0));
+        if (frameLength > 0 && offset + headerLength + frameLength <= len) {
+          aacSample = { unit: data.subarray(offset + headerLength, offset + headerLength + frameLength), pts: stamp, dts: stamp };
           track.samples.push(aacSample);
-          track.len += adtsFrameSize;
-          adtsStartOffset += adtsFrameSize + adtsHeaderLen;
-          nbSamples++;
+          track.len += frameLength;
+          offset += frameLength + headerLength;
+          frameIndex++;
           // look for ADTS header (0xFFFx)
-          for (; adtsStartOffset < len - 1; adtsStartOffset++) {
-            if (data[adtsStartOffset] === 0xff && (data[adtsStartOffset + 1] & 0xf0) === 0xf0) {
+          for (; offset < len - 1; offset++) {
+            if (data[offset] === 0xff && (data[offset + 1] & 0xf0) === 0xf0) {
               break;
             }
           }
@@ -4405,8 +4440,8 @@ var TSDemuxer = (function () {
           break;
         }
       }
-      if (adtsStartOffset < len) {
-        this.aacOverFlow = data.subarray(adtsStartOffset, len);
+      if (offset < len) {
+        this.aacOverFlow = data.subarray(offset, len);
       } else {
         this.aacOverFlow = null;
       }
@@ -5495,8 +5530,9 @@ var PlaylistLoader = (function () {
   }, {
     key: 'loadsuccess',
     value: function loadsuccess(event, stats) {
-      var string = event.currentTarget.responseText,
-          url = event.currentTarget.responseURL,
+      var target = event.currentTarget,
+          string = target.responseText,
+          url = target.responseURL,
           id = this.id,
           id2 = this.id2,
           hls = this.hls,
@@ -5507,7 +5543,7 @@ var PlaylistLoader = (function () {
         url = this.url;
       }
       stats.tload = performance.now();
-      stats.mtime = new Date(event.currentTarget.getResponseHeader('Last-Modified'));
+      stats.mtime = new Date(target.getResponseHeader('Last-Modified'));
       if (string.indexOf('#EXTM3U') === 0) {
         if (string.indexOf('#EXTINF:') > 0) {
           // 1 level playlist
@@ -6317,11 +6353,13 @@ var MP4Remuxer = (function () {
         samples.push(mp4Sample);
         lastDTS = dtsnorm;
       }
+      var lastSampleDuration = 0;
       if (samples.length >= 2) {
-        mp4Sample.duration = samples[samples.length - 2].duration;
+        lastSampleDuration = samples[samples.length - 2].duration;
+        mp4Sample.duration = lastSampleDuration;
       }
       // next AVC sample DTS should be equal to last sample DTS + last sample duration
-      this.nextAvcDts = dtsnorm + mp4Sample.duration * pes2mp4ScaleFactor;
+      this.nextAvcDts = dtsnorm + lastSampleDuration * pes2mp4ScaleFactor;
       track.len = 0;
       track.nbNalu = 0;
       if (/chrome|firefox/.test(navigator.userAgent.toLowerCase())) {
@@ -6337,9 +6375,9 @@ var MP4Remuxer = (function () {
         moof: moof,
         mdat: mdat,
         startPTS: firstPTS / pesTimeScale,
-        endPTS: (ptsnorm + pes2mp4ScaleFactor * mp4Sample.duration) / pesTimeScale,
+        endPTS: (ptsnorm + pes2mp4ScaleFactor * lastSampleDuration) / pesTimeScale,
         startDTS: firstDTS / pesTimeScale,
-        endDTS: (dtsnorm + pes2mp4ScaleFactor * mp4Sample.duration) / pesTimeScale,
+        endDTS: this.nextAvcDts / pesTimeScale,
         type: 'video',
         nb: samples.length
       });
@@ -6363,14 +6401,24 @@ var MP4Remuxer = (function () {
           dts,
           ptsnorm,
           dtsnorm,
-          samples = [];
+          samples = [],
+          samples0 = [];
 
-      while (track.samples.length) {
-        aacSample = track.samples.shift();
+      track.samples.forEach(function (aacSample) {
+        if (pts === undefined || aacSample.pts > pts) {
+          samples0.push(aacSample);
+          pts = aacSample.pts;
+        } else {
+          _utilsLogger.logger.warn('dropping past audio frame');
+        }
+      });
+
+      while (samples0.length) {
+        aacSample = samples0.shift();
         unit = aacSample.unit;
         pts = aacSample.pts - this._initDTS;
         dts = aacSample.dts - this._initDTS;
-        //logger.log('Audio/PTS:' + aacSample.pts.toFixed(0));
+        //logger.log(`Audio/PTS:${aacSample.pts.toFixed(0)}`);
         // if not first sample
         if (lastDTS !== undefined) {
           ptsnorm = this._PTSNormalize(pts, lastDTS);
@@ -6432,27 +6480,32 @@ var MP4Remuxer = (function () {
         samples.push(mp4Sample);
         lastDTS = dtsnorm;
       }
+      var lastSampleDuration = 0;
+      var nbSamples = samples.length;
       //set last sample duration as being identical to previous sample
-      if (samples.length >= 2) {
-        mp4Sample.duration = samples[samples.length - 2].duration;
+      if (nbSamples >= 2) {
+        lastSampleDuration = samples[nbSamples - 2].duration;
+        mp4Sample.duration = lastSampleDuration;
       }
-      // next aac sample PTS should be equal to last sample PTS + duration
-      this.nextAacPts = ptsnorm + pes2mp4ScaleFactor * mp4Sample.duration;
-      //logger.log('Audio/PTS/PTSend:' + aacSample.pts.toFixed(0) + '/' + this.nextAacDts.toFixed(0));
-      track.len = 0;
-      track.samples = samples;
-      moof = _remuxMp4Generator2['default'].moof(track.sequenceNumber++, firstDTS / pes2mp4ScaleFactor, track);
-      track.samples = [];
-      this.observer.trigger(_events2['default'].FRAG_PARSING_DATA, {
-        moof: moof,
-        mdat: mdat,
-        startPTS: firstPTS / pesTimeScale,
-        endPTS: this.nextAacPts / pesTimeScale,
-        startDTS: firstDTS / pesTimeScale,
-        endDTS: (dtsnorm + pes2mp4ScaleFactor * mp4Sample.duration) / pesTimeScale,
-        type: 'audio',
-        nb: samples.length
-      });
+      if (nbSamples) {
+        // next aac sample PTS should be equal to last sample PTS + duration
+        this.nextAacPts = ptsnorm + pes2mp4ScaleFactor * lastSampleDuration;
+        //logger.log('Audio/PTS/PTSend:' + aacSample.pts.toFixed(0) + '/' + this.nextAacDts.toFixed(0));
+        track.len = 0;
+        track.samples = samples;
+        moof = _remuxMp4Generator2['default'].moof(track.sequenceNumber++, firstDTS / pes2mp4ScaleFactor, track);
+        track.samples = [];
+        this.observer.trigger(_events2['default'].FRAG_PARSING_DATA, {
+          moof: moof,
+          mdat: mdat,
+          startPTS: firstPTS / pesTimeScale,
+          endPTS: this.nextAacPts / pesTimeScale,
+          startDTS: firstDTS / pesTimeScale,
+          endDTS: (dtsnorm + pes2mp4ScaleFactor * lastSampleDuration) / pesTimeScale,
+          type: 'audio',
+          nb: nbSamples
+        });
+      }
     }
   }, {
     key: 'remuxID3',
@@ -6880,7 +6933,7 @@ var XhrLoader = (function () {
 
       this.url = url;
       if (frag && !isNaN(frag.byteRangeStartOffset) && !isNaN(frag.byteRangeEndOffset)) {
-        this.byteRange = frag.byteRangeStartOffset + '-' + frag.byteRangeEndOffset;
+        this.byteRange = frag.byteRangeStartOffset + '-' + (frag.byteRangeEndOffset - 1);
       }
       this.responseType = responseType;
       this.onSuccess = onSuccess;
