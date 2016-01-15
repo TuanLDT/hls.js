@@ -184,13 +184,13 @@ header {
   </div>
   <br><br>
 
-  <script src="../../streams.js"></script>
-  <!-- live-reload script -->
-  <script src="//localhost:8001"></script>
+  <!--<script src="../../streams.js"></script>
+   live-reload script 
+  <script src="//localhost:8001"></script>-->
   <script src="../dist/hls.js"></script>
-  <script src="canvas.js"></script>
-  <script src="metrics.js"></script>
-  <script src="jsonpack.js"></script>
+  <script src="demo/canvas.js"></script>
+  <script src="demo/metrics.js"></script>
+  <script src="demo/jsonpack.js"></script>
   <script>
 
 $(document).ready(function() {
@@ -728,12 +728,12 @@ function timeRangesToString(r) {
               + "Played:"
               + timeRangesToString(v.played) + "<br>";
 
-      var videoPlaybackQuality = v.getVideoPlaybackQuality();
-      if(videoPlaybackQuality) {
-        log+="Dropped Frames:"+ videoPlaybackQuality.droppedVideoFrames + "<br>";
-        log+="Corrupted Frames:"+ videoPlaybackQuality.corruptedVideoFrames + "<br>";
-      }
-      $("#buffered_log").html(log);
+      // var videoPlaybackQuality = v.getVideoPlaybackQuality();
+      // if(videoPlaybackQuality) {
+      //   log+="Dropped Frames:"+ videoPlaybackQuality.droppedVideoFrames + "<br>";
+      //   log+="Corrupted Frames:"+ videoPlaybackQuality.corruptedVideoFrames + "<br>";
+      // }
+      // $("#buffered_log").html(log);
       $("#HlsStats").text(JSON.stringify(sortObject(stats),null,"\t"));
       ctx.fillStyle = "blue";
       var x = v.currentTime / v.duration * canvas.width;

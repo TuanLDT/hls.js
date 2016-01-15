@@ -882,7 +882,7 @@ class MSEMediaController {
   onMediaSeeking() {
     //console.log('seeking');
     this.seekState = 1;
-    setTimeout(this._stateSeekLow.bind(this), 300);
+    setTimeout(this._stateSeekLow.bind(this), 500);
     if (this.state === State.FRAG_LOADING) {
       // check if currently loaded fragment is inside buffer.
       //if outside, cancel fragment loading, otherwise do nothing
@@ -1198,7 +1198,7 @@ class MSEMediaController {
         stats.tbuffered = performance.now();
         this.fragLastKbps = Math.round(8 * stats.length / (stats.tbuffered - stats.tfirst));
         this.hls.trigger(Event.FRAG_BUFFERED, {stats: stats, frag: frag});
-        //logger.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
+        logger.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
         console.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
         this.state = State.IDLE;
       }
@@ -1234,7 +1234,7 @@ _checkBuffer() {
           // if less than 200ms is buffered, and media is playing but playhead is not moving,
           // and we have a new buffer range available upfront, let's seek to that one
           if(bufferInfo.len <= jumpThreshold) {
-            if(isPlaying) {
+            if(currentTime > media.playbackRate * this.lastCurrentTime || !isPlaying) {
               // playhead moving or media not playing
               jumpThreshold = 0;
             } else {
@@ -1262,8 +1262,7 @@ _checkBuffer() {
       if (readyState < 3 && this.seekState !== 1) {
         currentTime = media.currentTime;
         bufferInfo = this.bufferInfo(currentTime,0);
-
-        if (this.isBuffered(currentTime)) {
+        if (this.isBuffered(currentTime)  && !media.paused) {
          this._seekSmall();
         }
       }

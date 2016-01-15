@@ -1702,7 +1702,7 @@ var MSEMediaController = (function () {
     value: function onMediaSeeking() {
       //console.log('seeking');
       this.seekState = 1;
-      setTimeout(this._stateSeekLow.bind(this), 300);
+      setTimeout(this._stateSeekLow.bind(this), 500);
       if (this.state === State.FRAG_LOADING) {
         // check if currently loaded fragment is inside buffer.
         //if outside, cancel fragment loading, otherwise do nothing
