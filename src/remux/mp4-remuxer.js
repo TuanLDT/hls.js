@@ -39,11 +39,24 @@ class MP4Remuxer {
     }
     //logger.log('nb AVC samples:' + videoTrack.samples.length);
     if (videoTrack.samples.length) {
-      this.remuxVideo(videoTrack,timeOffset,contiguous);
+      try{
+        this.remuxVideo(videoTrack,timeOffset,contiguous);
+      } catch(e) {
+        this.observer.trigger(Event.ERROR, {type : ErrorTypes.MEDIA_ERROR, details: ErrorDetails.FRAG_PARSING_ERROR, fatal: false, reason: 'video parsing errors'});
+        console.log('PARSING ERROR VIDEO', e);
+        return;
+      }
+      
     }
     //logger.log('nb AAC samples:' + audioTrack.samples.length);
     if (audioTrack.samples.length) {
-      this.remuxAudio(audioTrack,timeOffset,contiguous);
+      try {
+        this.remuxAudio(audioTrack,timeOffset,contiguous);
+      } catch(e) {
+        this.observer.trigger(Event.ERROR, {type : ErrorTypes.MEDIA_ERROR, details: ErrorDetails.FRAG_PARSING_ERROR, fatal: false, reason: 'audio parsing errors'});
+        console.log('PARSING ERROR AUDIO', e);
+        return;
+      }
     }
     //logger.log('nb ID3 samples:' + audioTrack.samples.length);
     if (id3Track.samples.length) {

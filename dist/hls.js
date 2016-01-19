@@ -1160,6 +1160,7 @@ var MSEMediaController = (function () {
                 this.startFragmentRequested = true;
                 hls.trigger(_events2['default'].FRAG_LOADING, { frag: _frag });
                 this.state = State.FRAG_LOADING;
+                // console.log('State.FRAG_LOADING');
               }
             }
           }
@@ -2012,6 +2013,14 @@ var MSEMediaController = (function () {
         case _errors.ErrorDetails.LEVEL_LOAD_ERROR:
         case _errors.ErrorDetails.LEVEL_LOAD_TIMEOUT:
         case _errors.ErrorDetails.KEY_LOAD_ERROR:
+        case _errors.ErrorDetails.FRAG_PARSING_ERROR:
+          // console.log('handle FRAG_PARSING_ERROR');
+          // flush everything
+          this.flushBufferCounter = 0;
+          this.flushRange.push({ start: 0, end: Number.POSITIVE_INFINITY });
+          this.state = State.BUFFER_FLUSHING;
+          this.tick();
+          break;
         case _errors.ErrorDetails.KEY_LOAD_TIMEOUT:
           // if fatal error, stop processing, otherwise move to IDLE to retry loading
           _utilsLogger.logger.warn('mediaController: ' + data.details + ' while loading frag,switch to ' + (data.fatal ? 'ERROR' : 'IDLE') + ' state ...');
@@ -2097,8 +2106,8 @@ var MSEMediaController = (function () {
         if (readyState < 3 && this.seekState !== 1 && this.seekState !== 3) {
           currentTime = media.currentTime;
           // bufferInfo = this.bufferInfo(currentTime,0);
-          console.log('readyState : ' + readyState);
-          console.log('this.seekState : ' + this.seekState);
+          //console.log('readyState : '+ readyState);
+          //console.log('this.seekState : '+ this.seekState);
           if (this.isBuffered(currentTime) && !media.paused) {
             this._seekSmall();
           }
@@ -2125,7 +2134,7 @@ var MSEMediaController = (function () {
           media.currentTime = currentTime + second;
           self.seekSmall = null;
           this.seekState = 3;
-          console.log('seek small currentTime from ' + currentTime + ' to ' + (currentTime + second));
+          //console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
         }, 100);
       }
     }
@@ -6178,11 +6187,23 @@ var MP4Remuxer = (function () {
       }
       //logger.log('nb AVC samples:' + videoTrack.samples.length);
       if (videoTrack.samples.length) {
-        this.remuxVideo(videoTrack, timeOffset, contiguous);
+        try {
+          this.remuxVideo(videoTrack, timeOffset, contiguous);
+        } catch (e) {
+          this.observer.trigger(_events2['default'].ERROR, { type: _errors.ErrorTypes.MEDIA_ERROR, details: _errors.ErrorDetails.FRAG_PARSING_ERROR, fatal: false, reason: 'video parsing errors' });
+          console.log('PARSING ERROR VIDEO', e);
+          return;
+        }
       }
       //logger.log('nb AAC samples:' + audioTrack.samples.length);
       if (audioTrack.samples.length) {
-        this.remuxAudio(audioTrack, timeOffset, contiguous);
+        try {
+          this.remuxAudio(audioTrack, timeOffset, contiguous);
+        } catch (e) {
+          this.observer.trigger(_events2['default'].ERROR, { type: _errors.ErrorTypes.MEDIA_ERROR, details: _errors.ErrorDetails.FRAG_PARSING_ERROR, fatal: false, reason: 'audio parsing errors' });
+          console.log('PARSING ERROR AUDIO', e);
+          return;
+        }
       }
       //logger.log('nb ID3 samples:' + audioTrack.samples.length);
       if (id3Track.samples.length) {
@@ -6350,11 +6371,9 @@ var MP4Remuxer = (function () {
         };
         if (avcSample.key === true) {
           // the current sample is a key frame
-          // console.log('----------- key frame --------');
           mp4Sample.flags.dependsOn = 2;
           mp4Sample.flags.isNonSync = 0;
         } else {
-          // console.log('----------- not key frame --------');
           mp4Sample.flags.dependsOn = 1;
           mp4Sample.flags.isNonSync = 1;
         }
@@ -6377,7 +6396,6 @@ var MP4Remuxer = (function () {
         samples[0].flags.isNonSync = 0;
       }
       track.samples = samples;
-      // console.log(samples);
       moof = _remuxMp4Generator2['default'].moof(track.sequenceNumber++, firstDTS / pes2mp4ScaleFactor, track);
       track.samples = [];
       this.observer.trigger(_events2['default'].FRAG_PARSING_DATA, {

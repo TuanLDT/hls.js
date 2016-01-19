@@ -90,6 +90,14 @@ header {
       <select id='video-level'>
         <option>11</option>
       </select>
+      <input type = "button" id='auto' value= -1 onclick="selectLevel(-1)"/>
+      <input type = "button" id='level-0' value= 0 onclick="selectLevel(0)"/>
+      <input type = "button" id='level-1' value= 1 onclick="selectLevel(1)"/>
+      <input type = "button" id='level-2' value= 2 onclick="selectLevel(2)"/>
+      <input type = "button" id='level-3' value= 3 onclick="selectLevel(3)"/>
+      <input type = "button" id='level-4' value= 4 onclick="selectLevel(4)"/>
+
+
     </div>
 
 
@@ -271,6 +279,9 @@ $(document).ready(function() {
           // fpsDroppedMonitoringThreshold: 0.2,
           appendErrorMaxRetry: 3,
         };
+
+
+
       $("#HlsStatus").text('loading ' + url);
        events = { url : url, t0 : performance.now(), load : [], buffer : [], video : [], level : [], bitrate : []};
        recoverDecodingErrorDate = recoverSwapAudioCodecDate = null;
@@ -338,8 +349,10 @@ $(document).ready(function() {
           events.load.push(event);
           refreshCanvas();
        });
-
-       function videoLevels (levels) {
+    window.selectLevel = function (level){
+          hls.nextLevel = level;
+      }
+    function videoLevels (levels) {
     var dataHtml = '<option value=-1 selected>Auto</option>';
       $.each(levels,function (key, value){
         dataHtml += '<option value='+key+'>';

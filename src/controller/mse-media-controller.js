@@ -339,6 +339,7 @@ class MSEMediaController {
               this.startFragmentRequested = true;
               hls.trigger(Event.FRAG_LOADING, {frag: frag});
               this.state = State.FRAG_LOADING;
+              // console.log('State.FRAG_LOADING');
             }
           }
         }
@@ -1186,6 +1187,14 @@ class MSEMediaController {
       case ErrorDetails.LEVEL_LOAD_ERROR:
       case ErrorDetails.LEVEL_LOAD_TIMEOUT:
       case ErrorDetails.KEY_LOAD_ERROR:
+      case ErrorDetails.FRAG_PARSING_ERROR:
+        // console.log('handle FRAG_PARSING_ERROR');
+        // flush everything
+        this.flushBufferCounter = 0;
+        this.flushRange.push({start: 0, end: Number.POSITIVE_INFINITY});
+        this.state = State.BUFFER_FLUSHING;
+        this.tick();
+        break;
       case ErrorDetails.KEY_LOAD_TIMEOUT:
         // if fatal error, stop processing, otherwise move to IDLE to retry loading
         logger.warn(`mediaController: ${data.details} while loading frag,switch to ${data.fatal ? 'ERROR' : 'IDLE'} state ...`);
@@ -1269,8 +1278,8 @@ _checkBuffer() {
       if (readyState < 3 && this.seekState !== 1 && this.seekState !== 3) {
         currentTime = media.currentTime;
         // bufferInfo = this.bufferInfo(currentTime,0);
-        console.log('readyState : '+ readyState);
-        console.log('this.seekState : '+ this.seekState);
+        //console.log('readyState : '+ readyState);
+        //console.log('this.seekState : '+ this.seekState);
         if (this.isBuffered(currentTime)  && !media.paused) {
          this._seekSmall();
         }
@@ -1293,7 +1302,7 @@ _checkBuffer() {
         media.currentTime = currentTime + second;
         self.seekSmall = null;
         this.seekState = 3;
-        console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
+        //console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
       }, 100);
     }
   }
