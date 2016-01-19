@@ -1701,8 +1701,13 @@ var MSEMediaController = (function () {
     key: 'onMediaSeeking',
     value: function onMediaSeeking() {
       //console.log('seeking');
-      this.seekState = 1;
-      setTimeout(this._stateSeekLow.bind(this), 500);
+      if (this.seekState === 3) {
+        setTimeout(this._stateSeekLow.bind(this), 500);
+      } else {
+        this.seekState = 1;
+        setTimeout(this._stateSeekLow.bind(this), 1000);
+      }
+
       if (this.state === State.FRAG_LOADING) {
         // check if currently loaded fragment is inside buffer.
         //if outside, cancel fragment loading, otherwise do nothing
@@ -2028,8 +2033,8 @@ var MSEMediaController = (function () {
           stats.tbuffered = performance.now();
           this.fragLastKbps = Math.round(8 * stats.length / (stats.tbuffered - stats.tfirst));
           this.hls.trigger(_events2['default'].FRAG_BUFFERED, { stats: stats, frag: frag });
-          //logger.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
-          console.log('media buffered : ' + this.timeRangesToString(this.media.buffered));
+          _utilsLogger.logger.log('media buffered : ' + this.timeRangesToString(this.media.buffered));
+          // console.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
           this.state = State.IDLE;
         }
       }
@@ -2058,14 +2063,14 @@ var MSEMediaController = (function () {
             currentTime = media.currentTime;
             bufferInfo = this.bufferInfo(currentTime, 0);
 
-            var isPlaying = !(media.paused || media.ended || readyState < 3),
-                jumpThreshold = 1;
+            var isPlaying = !(media.paused || media.ended || media.seeking || readyState < 3),
+                jumpThreshold = 0.2;
 
             // check buffer upfront
             // if less than 200ms is buffered, and media is playing but playhead is not moving,
             // and we have a new buffer range available upfront, let's seek to that one
             if (bufferInfo.len <= jumpThreshold) {
-              if (isPlaying) {
+              if (currentTime > media.playbackRate * this.lastCurrentTime || !isPlaying) {
                 // playhead moving or media not playing
                 jumpThreshold = 0;
               } else {
@@ -2081,7 +2086,7 @@ var MSEMediaController = (function () {
                   // this will ensure effective video decoding
 
                   media.currentTime = nextBufferStart;
-                  this.seekState = 1;
+                  this.seekState = 3;
                   return;
                 }
               }
@@ -2089,11 +2094,12 @@ var MSEMediaController = (function () {
           }
         }
 
-        if (readyState < 3 && this.seekState !== 1) {
+        if (readyState < 3 && this.seekState !== 1 && this.seekState !== 3) {
           currentTime = media.currentTime;
-          bufferInfo = this.bufferInfo(currentTime, 0);
-
-          if (this.isBuffered(currentTime)) {
+          // bufferInfo = this.bufferInfo(currentTime,0);
+          console.log('readyState : ' + readyState);
+          console.log('this.seekState : ' + this.seekState);
+          if (this.isBuffered(currentTime) && !media.paused) {
             this._seekSmall();
           }
         }
@@ -2102,7 +2108,7 @@ var MSEMediaController = (function () {
   }, {
     key: '_stateSeekLow',
     value: function _stateSeekLow() {
-      if (this.seekState === 1) {
+      if (this.seekState === 1 || this.seekState === 3) {
         this.seekState = 2;
       }
     }
@@ -2112,14 +2118,14 @@ var MSEMediaController = (function () {
       var second = arguments.length <= 0 || arguments[0] === undefined ? 0.1 : arguments[0];
 
       var self = this;
-      if (!this.seekSmall) {
+      if (!this.seekSmall && self.state === State.IDLE) {
         self.seekSmall = setTimeout(function () {
           var media = self.media;
           var currentTime = media.currentTime;
           media.currentTime = currentTime + second;
           self.seekSmall = null;
-          this.seekState = 1;
-          //console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
+          this.seekState = 3;
+          console.log('seek small currentTime from ' + currentTime + ' to ' + (currentTime + second));
         }, 100);
       }
     }
@@ -6344,9 +6350,11 @@ var MP4Remuxer = (function () {
         };
         if (avcSample.key === true) {
           // the current sample is a key frame
+          // console.log('----------- key frame --------');
           mp4Sample.flags.dependsOn = 2;
           mp4Sample.flags.isNonSync = 0;
         } else {
+          // console.log('----------- not key frame --------');
           mp4Sample.flags.dependsOn = 1;
           mp4Sample.flags.isNonSync = 1;
         }
@@ -6369,6 +6377,7 @@ var MP4Remuxer = (function () {
         samples[0].flags.isNonSync = 0;
       }
       track.samples = samples;
+      // console.log(samples);
       moof = _remuxMp4Generator2['default'].moof(track.sequenceNumber++, firstDTS / pes2mp4ScaleFactor, track);
       track.samples = [];
       this.observer.trigger(_events2['default'].FRAG_PARSING_DATA, {
