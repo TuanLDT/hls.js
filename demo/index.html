@@ -630,14 +630,17 @@ var lastSeekingIdx, lastStartPosition,lastDuration;
       case 'canplay':
       case 'canplaythrough':
       case 'ended':
-      case 'seeking':
-      case 'seeked':
-      case 'play':
+      case 'seeking': console.log('seeking'); break;
+      case 'seeked': console.log('seeked'); break;
+      case 'play': console.log('play'); break;
       case 'playing':
-        lastStartPosition = evt.target.currentTime;
-      case 'pause':
+      console.log('playing');
+        lastStartPosition = evt.target.currentTime; break;
+      case 'pause': console.log('pause'); break;
       case 'waiting':
+        console.log('waiting'); break;
       case 'stalled':
+       console.log('stalled'); break;
       case 'error':
         data = Math.round(evt.target.currentTime*1000);
         if(evt.type === 'error') {
@@ -658,6 +661,7 @@ var lastSeekingIdx, lastStartPosition,lastDuration;
               break;
           }
           $("#HlsStatus").text(errorTxt);
+          // seekToNearestBuffered();
           console.error(errorTxt);
         }
         break;
@@ -699,6 +703,28 @@ function handleMediaError() {
   }
 }
 
+function seekToNearestBuffered() {
+  var pos = video.currentTime,
+    closest = null,
+    smallestDiff = null,
+    start, diff;
+
+  console.log("[hlsjs] attempt to seek to nearest buffered area, currentTime:", pos);
+
+  for (var i = 0; i < video.buffered.length; i++) {
+    start = video.buffered.start(i);
+    diff = Math.abs(pos - start);
+    if (smallestDiff === null || diff < smallestDiff) {
+      closest = start;
+      smallestDiff = diff;
+    }
+  }
+
+  if (closest !== null) {
+    console.log("[hlsjs] seeking to closest buffered area start:", closest);
+    video.currentTime = closest;
+  }
+}
 
 function timeRangesToString(r) {
   var log = "";

@@ -1302,7 +1302,7 @@ _checkBuffer() {
         media.currentTime = currentTime + second;
         self.seekSmall = null;
         this.seekState = 3;
-        //console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
+        // console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
       }, 100);
     }
   }
