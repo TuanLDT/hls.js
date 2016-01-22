@@ -630,17 +630,21 @@ var lastSeekingIdx, lastStartPosition,lastDuration;
       case 'canplay':
       case 'canplaythrough':
       case 'ended':
-      case 'seeking': console.log('seeking'); break;
-      case 'seeked': console.log('seeked'); break;
-      case 'play': console.log('play'); break;
+      case 'seeking':
+       // console.log('seeking'); break;
+      case 'seeked':
+       // console.log('seeked'); break;
+      case 'play':
+       // console.log('play'); break;
       case 'playing':
-      console.log('playing');
+      // console.log('playing');
         lastStartPosition = evt.target.currentTime; break;
-      case 'pause': console.log('pause'); break;
+      case 'pause':
+       // console.log('pause'); break;
       case 'waiting':
-        console.log('waiting'); break;
+        // console.log('waiting'); break;
       case 'stalled':
-       console.log('stalled'); break;
+       // console.log('stalled'); break;
       case 'error':
         data = Math.round(evt.target.currentTime*1000);
         if(evt.type === 'error') {

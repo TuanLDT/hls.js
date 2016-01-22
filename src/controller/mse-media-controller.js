@@ -4,6 +4,7 @@
 
 import Demuxer from '../demux/demuxer';
 import Event from '../events';
+import EventHandler from '../event-handler';
 import {logger} from '../utils/logger';
 import BinarySearch from '../utils/binary-search';
 import LevelHelper from '../helper/level-helper';
@@ -23,40 +24,32 @@ const State = {
   BUFFER_FLUSHING : 8
 };
 
-class MSEMediaController {
+class MSEMediaController extends EventHandler {
 
   constructor(hls) {
+    super(hls, Event.MEDIA_ATTACHING,
+      Event.MEDIA_DETACHING,
+      Event.MANIFEST_PARSED,
+      Event.LEVEL_LOADED,
+      Event.KEY_LOADED,
+      Event.FRAG_LOADED,
+      Event.FRAG_PARSING_INIT_SEGMENT,
+      Event.FRAG_PARSING_DATA,
+      Event.FRAG_PARSED,
+      Event.ERROR);
     this.config = hls.config;
     this.audioCodecSwap = false;
-    this.hls = hls;
     this.ticks = 0;
     this.seekState = 0;
     // Source Buffer listeners
     this.onsbue = this.onSBUpdateEnd.bind(this);
     this.onsbe  = this.onSBUpdateError.bind(this);
-    // internal listeners
-    this.onmediaatt0 = this.onMediaAttaching.bind(this);
-    this.onmediadet0 = this.onMediaDetaching.bind(this);
-    this.onmp = this.onManifestParsed.bind(this);
-    this.onll = this.onLevelLoaded.bind(this);
-    this.onfl = this.onFragLoaded.bind(this);
-    this.onkl = this.onKeyLoaded.bind(this);
-    this.onis = this.onInitSegment.bind(this);
-    this.onfpg = this.onFragParsing.bind(this);
-    this.onfp = this.onFragParsed.bind(this);
-    this.onerr = this.onError.bind(this);
     this.ontick = this.tick.bind(this);
-    hls.on(Event.MEDIA_ATTACHING, this.onmediaatt0);
-    hls.on(Event.MEDIA_DETACHING, this.onmediadet0);
-    hls.on(Event.MANIFEST_PARSED, this.onmp);
   }
 
   destroy() {
     this.stop();
-    var hls = this.hls;
-    hls.off(Event.MEDIA_ATTACHING, this.onmediaatt0);
-    hls.off(Event.MEDIA_DETACHING, this.onmediadet0);
-    hls.off(Event.MANIFEST_PARSED, this.onmp);
+    EventHandler.prototype.destroy.call(this);
     this.state = State.IDLE;
   }
 
@@ -88,19 +81,13 @@ class MSEMediaController {
     this.timer = setInterval(this.ontick, 100);
     this.level = -1;
     this.fragLoadError = 0;
-    hls.on(Event.FRAG_LOADED, this.onfl);
-    hls.on(Event.FRAG_PARSING_INIT_SEGMENT, this.onis);
-    hls.on(Event.FRAG_PARSING_DATA, this.onfpg);
-    hls.on(Event.FRAG_PARSED, this.onfp);
-    hls.on(Event.ERROR, this.onerr);
-    hls.on(Event.LEVEL_LOADED, this.onll);
-    hls.on(Event.KEY_LOADED, this.onkl);
   }
 
   stop() {
     this.mp4segments = [];
     this.flushRange = [];
     this.bufferRange = [];
+    this.stalled = false;
     var frag = this.fragCurrent;
     if (frag) {
       if (frag.loader) {
@@ -129,14 +116,6 @@ class MSEMediaController {
       this.demuxer.destroy();
       this.demuxer = null;
     }
-    var hls = this.hls;
-    hls.off(Event.FRAG_LOADED, this.onfl);
-    hls.off(Event.FRAG_PARSED, this.onfp);
-    hls.off(Event.FRAG_PARSING_DATA, this.onfpg);
-    hls.off(Event.LEVEL_LOADED, this.onll);
-    hls.off(Event.KEY_LOADED, this.onkl);
-    hls.off(Event.FRAG_PARSING_INIT_SEGMENT, this.onis);
-    hls.off(Event.ERROR, this.onerr);
   }
 
   tick() {
@@ -209,7 +188,9 @@ class MSEMediaController {
           this.level = level;
           levelDetails = this.levels[level].details;
           // if level info not retrieved yet, switch state and wait for level retrieval
-          if (typeof levelDetails === 'undefined') {
+          // if live playlist, ensure that new playlist has been refreshed to avoid loading/try to load
+          // a useless and outdated fragment (that might even introduce load error if it is already out of the live playlist)
+          if (typeof levelDetails === 'undefined' || levelDetails.live && this.levelLastLoaded !== level) {
             this.state = State.WAITING_LEVEL;
             break;
           }
@@ -370,7 +351,7 @@ class MSEMediaController {
             }
             pos = v.currentTime;
             var fragLoadedDelay = (frag.expectedLen - frag.loaded) / loadRate;
-            var bufferStarvationDelay = this.bufferInfo(pos,0.3).end - pos;
+            var bufferStarvationDelay = this.bufferInfo(pos,this.config.maxBufferHole).end - pos;
             var fragLevelNextLoadedDelay = frag.duration * this.levels[hls.nextLoadLevel].bitrate / (8 * loadRate); //bps/Bps
             /* if we have less than 2 frag duration in buffer and if frag loaded delay is greater than buffer starvation delay
               ... and also bigger than duration needed to load fragment at next level ...*/
@@ -558,7 +539,8 @@ class MSEMediaController {
         bufferEnd = end + maxHoleDuration;
         bufferLen = bufferEnd - pos;
       } else if ((pos + maxHoleDuration) < start) {
-        bufferStartNext = bufferStartNext || start;
+        bufferStartNext = start;
+        break;
       }
     }
     return {len: bufferLen, start: bufferStart, end: bufferEnd, nextStart : bufferStartNext};
@@ -811,7 +793,7 @@ class MSEMediaController {
     }
   }
 
-  onMediaAttaching(event, data) {
+  onMediaAttaching(data) {
     var media = this.media = data.media;
     // setup the media source
     var ms = this.mediaSource = new MediaSource();
@@ -894,7 +876,7 @@ class MSEMediaController {
     if (this.state === State.FRAG_LOADING) {
       // check if currently loaded fragment is inside buffer.
       //if outside, cancel fragment loading, otherwise do nothing
-      if (this.bufferInfo(this.media.currentTime,0.3).len === 0) {
+      if (this.bufferInfo(this.media.currentTime,this.config.maxBufferHole).len === 0) {
         logger.log('seeking outside of buffer while fragment load in progress, cancel fragment load');
         var fragCurrent = this.fragCurrent;
         if (fragCurrent) {
@@ -944,7 +926,7 @@ class MSEMediaController {
   }
 
 
-  onManifestParsed(event, data) {
+  onManifestParsed(data) {
     var aac = false, heaac = false, codecs;
     data.levels.forEach(level => {
       // detect if we have different kind of audio codecs used amongst playlists
@@ -970,13 +952,14 @@ class MSEMediaController {
     }
   }
 
-  onLevelLoaded(event,data) {
+  onLevelLoaded(data) {
     var newDetails = data.details,
         newLevelId = data.level,
         curLevel = this.levels[newLevelId],
         duration = newDetails.totalduration;
 
     logger.log(`level ${newLevelId} loaded [${newDetails.startSN},${newDetails.endSN}],duration:${duration}`);
+    this.levelLastLoaded = newLevelId;
 
     if (newDetails.live) {
       var curDetails = curLevel.details;
@@ -1023,7 +1006,7 @@ class MSEMediaController {
     }
   }
 
-  onFragLoaded(event, data) {
+  onFragLoaded(data) {
     var fragCurrent = this.fragCurrent;
     if (this.state === State.FRAG_LOADING &&
         fragCurrent &&
@@ -1064,7 +1047,7 @@ class MSEMediaController {
     this.fragLoadError = 0;
   }
 
-  onInitSegment(event, data) {
+  onFragParsingInitSegment(data) {
     if (this.state === State.PARSING) {
       // check if codecs have been explicitely defined in the master playlist for this level;
       // if yes use these ones instead of the ones parsed from the demux
@@ -1123,7 +1106,7 @@ class MSEMediaController {
     }
   }
 
-  onFragParsing(event, data) {
+  onFragParsingData(data) {
     if (this.state === State.PARSING) {
       this.tparse2 = Date.now();
       var level = this.levels[this.level],
@@ -1140,7 +1123,7 @@ class MSEMediaController {
       //trigger handler right now
       this.tick();
     } else {
-      logger.warn(`not in PARSING state, discarding ${event}`);
+      logger.warn(`not in PARSING state, ignoring FRAG_PARSING_DATA event`);
     }
   }
 
@@ -1153,7 +1136,7 @@ class MSEMediaController {
     }
   }
 
-  onError(event, data) {
+  onError(data) {
     switch(data.details) {
       case ErrorDetails.FRAG_LOAD_ERROR:
       case ErrorDetails.FRAG_LOAD_TIMEOUT:
@@ -1178,7 +1161,7 @@ class MSEMediaController {
             logger.error(`mediaController: ${data.details} reaches max retry, redispatch as fatal ...`);
             // redispatch same error but with fatal set to true
             data.fatal = true;
-            this.hls.trigger(event, data);
+            this.hls.trigger(Event.ERROR, data);
             this.state = State.ERROR;
           }
         }
@@ -1242,26 +1225,34 @@ _checkBuffer() {
         } else {
           currentTime= media.currentTime;
           bufferInfo = this.bufferInfo(currentTime,0);
-
           var isPlaying = !(media.paused || media.ended || media.seeking || readyState < 3),
-              jumpThreshold = 0.2;
+              jumpThreshold = 1,
+              playheadMoving = currentTime > media.playbackRate*this.lastCurrentTime;
+
+          if (this.stalled && playheadMoving) {
+            this.stalled = false;
+          }
 
           // check buffer upfront
           // if less than 200ms is buffered, and media is playing but playhead is not moving,
           // and we have a new buffer range available upfront, let's seek to that one
           if(bufferInfo.len <= jumpThreshold) {
-            if(currentTime > media.playbackRate * this.lastCurrentTime || !isPlaying) {
+            if(playheadMoving || !isPlaying) {
               // playhead moving or media not playing
               jumpThreshold = 0;
             } else {
-              logger.trace('playback seems stuck');
+              logger.log('playback seems stuck');
+              if(!this.stalled) {
+                this.hls.trigger(Event.ERROR, {type: ErrorTypes.MEDIA_ERROR, details: ErrorDetails.BUFFER_STALLED_ERROR, fatal: false});
+                this.stalled = true;
+              }   
             }
             // if we are below threshold, try to jump if next buffer range is close
             if(bufferInfo.len <= jumpThreshold) {
-              // no buffer available @ currentTime, check if next buffer is close (more than 5ms diff but within a 300 ms range)
+              // no buffer available @ currentTime, check if next buffer is close (more than 5ms diff but within a config.maxSeekHole second range)
               var nextBufferStart = bufferInfo.nextStart, delta = nextBufferStart-currentTime;
               if(nextBufferStart &&
-                 (delta < 2) &&
+                 (delta < this.config.maxSeekHole) &&
                  (delta > 0.005)) {
                 // next buffer is close ! adjust currentTime to nextBufferStart
                 // this will ensure effective video decoding
@@ -1272,18 +1263,19 @@ _checkBuffer() {
               }
             }
           }
+          if (readyState < 3 && this.seekState !== 1 && this.seekState !== 3) {
+            currentTime = media.currentTime;
+            // bufferInfo = this.bufferInfo(currentTime,0);
+            //console.log('readyState : '+ readyState);
+            //console.log('this.seekState : '+ this.seekState);
+            if (!media.paused) {
+             this._seekSmall();
+            }
+          }
         }
       }
 
-      if (readyState < 3 && this.seekState !== 1 && this.seekState !== 3) {
-        currentTime = media.currentTime;
-        // bufferInfo = this.bufferInfo(currentTime,0);
-        //console.log('readyState : '+ readyState);
-        //console.log('this.seekState : '+ this.seekState);
-        if (this.isBuffered(currentTime)  && !media.paused) {
-         this._seekSmall();
-        }
-      }
+
     }
   }
 
@@ -1299,10 +1291,14 @@ _checkBuffer() {
       self.seekSmall = setTimeout(function() {
         var media = self.media;
         var currentTime = media.currentTime;
-        media.currentTime = currentTime + second;
+        if (self.state === State.IDLE && media.readyState < 3) {
+            media.currentTime = currentTime + second;
+            console.log('readyState : '+ media.readyState);
+            console.log('this.seekState : '+ self.seekState);
+            console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
+            self.seekState = 3;
+          };
         self.seekSmall = null;
-        this.seekState = 3;
-        // console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
       }, 100);
     }
   }
