@@ -87,6 +87,17 @@ header {
         </select>
         <span id="currentResolution" style="float:right;font-size: 8pt;">-</span>
       </div>
+      <select id='video-level'>
+        <option>11</option>
+      </select>
+      <input type = "button" id='auto' value= -1 onclick="selectLevel(-1)"/>
+      <input type = "button" id='level-0' value= 0 onclick="selectLevel(0)"/>
+      <input type = "button" id='level-1' value= 1 onclick="selectLevel(1)"/>
+      <input type = "button" id='level-2' value= 2 onclick="selectLevel(2)"/>
+      <input type = "button" id='level-3' value= 3 onclick="selectLevel(3)"/>
+      <input type = "button" id='level-4' value= 4 onclick="selectLevel(4)"/>
+
+
     </div>
 
 
@@ -184,13 +195,13 @@ header {
   </div>
   <br><br>
 
-  <script src="../../streams.js"></script>
-  <!-- live-reload script -->
-  <script src="//localhost:8001"></script>
+  <!--<script src="../../streams.js"></script>
+   live-reload script 
+  <script src="//localhost:8001"></script>-->
   <script src="../dist/hls.js"></script>
-  <script src="canvas.js"></script>
-  <script src="metrics.js"></script>
-  <script src="jsonpack.js"></script>
+  <script src="demo/canvas.js"></script>
+  <script src="demo/metrics.js"></script>
+  <script src="demo/jsonpack.js"></script>
   <script>
 
 $(document).ready(function() {
@@ -244,12 +255,38 @@ $(document).ready(function() {
         $("#HlsStatus").text("Streaming disabled");
         return;
       }
+      var config = {
+          autoStartLoad: true,
+          debug: false,
+          maxBufferLength: 30,
+          maxBufferSize: 60 * 1000 * 1000,
+          liveSyncDurationCount: 3,
+          liveMaxLatencyDurationCount: Infinity,
+          maxMaxBufferLength: 30,
+          enableWorker: true,
+          enableSoftwareAES: true,
+          manifestLoadingTimeOut: 10000,
+          manifestLoadingMaxRetry: 1,
+          manifestLoadingRetryDelay: 1000,
+          levelLoadingTimeOut: 10000,
+          levelLoadingMaxRetry: 4,
+          levelLoadingRetryDelay: 1000,
+          fragLoadingTimeOut: 20000,
+          fragLoadingMaxRetry: 6,
+          fragLoadingRetryDelay: 1000,
+          fragLoadingLoopThreshold: 3,
+          // fpsDroppedMonitoringPeriod: 5000,
+          // fpsDroppedMonitoringThreshold: 0.2,
+          appendErrorMaxRetry: 3,
+        };
+
+
 
       $("#HlsStatus").text('loading ' + url);
        events = { url : url, t0 : performance.now(), load : [], buffer : [], video : [], level : [], bitrate : []};
        recoverDecodingErrorDate = recoverSwapAudioCodecDate = null;
        //hls = new Hls({debug:true, enableWorker : enableWorker});
-       hls = new Hls({debug:false, maxMaxBufferLength: 4});
+       hls = new Hls(config);
        $("#HlsStatus").text('loading manifest and attaching video element...');
        hls.loadSource(url);
        hls.autoLevelCapping = levelCapping;
@@ -294,6 +331,7 @@ $(document).ready(function() {
          $("#HlsStatus").text("manifest successfully loaded," + hls.levels.length + " levels found");
          stats = {levelNb: data.levels.length};
          updateLevelInfo();
+         videoLevels(data.levels);
        });
        hls.on(Hls.Events.LEVEL_LOADED,function(event,data) {
           events.isLive = data.details.live;
@@ -311,6 +349,28 @@ $(document).ready(function() {
           events.load.push(event);
           refreshCanvas();
        });
+    window.selectLevel = function (level){
+          hls.nextLevel = level;
+      }
+    function videoLevels (levels) {
+    var dataHtml = '<option value=-1 selected>Auto</option>';
+      $.each(levels,function (key, value){
+        dataHtml += '<option value='+key+'>';
+        dataHtml += value.height;
+        dataHtml += '</option>';
+      });
+    $('#video-level').html(dataHtml);
+  }
+
+  $('#video-level').change(function (){
+    var level = parseInt($('#video-level').val());
+    // player.tech.hls_.autoLevelCapping = level;
+    hls.nextLevel = level;
+    console.log('autoLevelEnabled = ' + hls.autoLevelEnabled);
+    console.log(level);
+    console.log('nextLevel = '+hls.nextLevel);
+    console.log('loadLevel = '+hls.loadLevel);
+  });
        hls.on(Hls.Events.FRAG_BUFFERED,function(event,data) {
           var event = {
             type : "fragment",
@@ -571,13 +631,20 @@ var lastSeekingIdx, lastStartPosition,lastDuration;
       case 'canplaythrough':
       case 'ended':
       case 'seeking':
+       // console.log('seeking'); break;
       case 'seeked':
+       // console.log('seeked'); break;
       case 'play':
+       // console.log('play'); break;
       case 'playing':
-        lastStartPosition = evt.target.currentTime;
+      // console.log('playing');
+        lastStartPosition = evt.target.currentTime; break;
       case 'pause':
+       // console.log('pause'); break;
       case 'waiting':
+        // console.log('waiting'); break;
       case 'stalled':
+       // console.log('stalled'); break;
       case 'error':
         data = Math.round(evt.target.currentTime*1000);
         if(evt.type === 'error') {
@@ -598,6 +665,7 @@ var lastSeekingIdx, lastStartPosition,lastDuration;
               break;
           }
           $("#HlsStatus").text(errorTxt);
+          // seekToNearestBuffered();
           console.error(errorTxt);
         }
         break;
@@ -639,6 +707,28 @@ function handleMediaError() {
   }
 }
 
+function seekToNearestBuffered() {
+  var pos = video.currentTime,
+    closest = null,
+    smallestDiff = null,
+    start, diff;
+
+  console.log("[hlsjs] attempt to seek to nearest buffered area, currentTime:", pos);
+
+  for (var i = 0; i < video.buffered.length; i++) {
+    start = video.buffered.start(i);
+    diff = Math.abs(pos - start);
+    if (smallestDiff === null || diff < smallestDiff) {
+      closest = start;
+      smallestDiff = diff;
+    }
+  }
+
+  if (closest !== null) {
+    console.log("[hlsjs] seeking to closest buffered area start:", closest);
+    video.currentTime = closest;
+  }
+}
 
 function timeRangesToString(r) {
   var log = "";
@@ -728,12 +818,12 @@ function timeRangesToString(r) {
               + "Played:"
               + timeRangesToString(v.played) + "<br>";
 
-      var videoPlaybackQuality = v.getVideoPlaybackQuality();
-      if(videoPlaybackQuality) {
-        log+="Dropped Frames:"+ videoPlaybackQuality.droppedVideoFrames + "<br>";
-        log+="Corrupted Frames:"+ videoPlaybackQuality.corruptedVideoFrames + "<br>";
-      }
-      $("#buffered_log").html(log);
+      // var videoPlaybackQuality = v.getVideoPlaybackQuality();
+      // if(videoPlaybackQuality) {
+      //   log+="Dropped Frames:"+ videoPlaybackQuality.droppedVideoFrames + "<br>";
+      //   log+="Corrupted Frames:"+ videoPlaybackQuality.corruptedVideoFrames + "<br>";
+      // }
+      // $("#buffered_log").html(log);
       $("#HlsStats").text(JSON.stringify(sortObject(stats),null,"\t"));
       ctx.fillStyle = "blue";
       var x = v.currentTime / v.duration * canvas.width;
