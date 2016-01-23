@@ -699,8 +699,7 @@ var LevelController = (function (_EventHandler) {
               }
               // redispatch same error but with fatal set to true
               data.fatal = true;
-              // hls.trigger(event, data);
-              hls.trigger(_events2['default'].ERROR, data);
+              hls.trigger(event, data);
             }
         }
       }
@@ -1693,12 +1692,14 @@ var MSEMediaController = (function (_EventHandler) {
     key: 'onMediaSeeking',
     value: function onMediaSeeking() {
       //console.log('seeking');
-      if (this.seekState === 3) {
-        setTimeout(this._stateSeekLow.bind(this), 500);
-      } else {
-        this.seekState = 1;
-        setTimeout(this._stateSeekLow.bind(this), 1000);
+
+      this.seekState = 1;
+      if (this.seekSlowlyTimeout) {
+        clearTimeout(this.seekSlowlyTimeout);
+        this.seekSlowlyTimeout = null;
       }
+
+      this.seekSlowlyTimeout = setTimeout(this._stateSeekLow.bind(this), 1000);
 
       if (this.state === State.FRAG_LOADING) {
         // check if currently loaded fragment is inside buffer.
@@ -2035,7 +2036,7 @@ var MSEMediaController = (function (_EventHandler) {
           this.fragLastKbps = Math.round(8 * stats.length / (stats.tbuffered - stats.tfirst));
           this.hls.trigger(_events2['default'].FRAG_BUFFERED, { stats: stats, frag: frag });
           _utilsLogger.logger.log('media buffered : ' + this.timeRangesToString(this.media.buffered));
-           // console.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
+          // console.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
           this.state = State.IDLE;
         }
       }
@@ -2066,9 +2067,11 @@ var MSEMediaController = (function (_EventHandler) {
             var isPlaying = !(media.paused || media.ended || media.seeking || readyState < 3),
                 jumpThreshold = 1,
                 playheadMoving = currentTime > media.playbackRate * this.lastCurrentTime;
+
             if (this.stalled && playheadMoving) {
               this.stalled = false;
             }
+
             // check buffer upfront
             // if less than 200ms is buffered, and media is playing but playhead is not moving,
             // and we have a new buffer range available upfront, let's seek to that one
@@ -2091,33 +2094,58 @@ var MSEMediaController = (function (_EventHandler) {
                 if (nextBufferStart && delta < this.config.maxSeekHole && delta > 0.005) {
                   // next buffer is close ! adjust currentTime to nextBufferStart
                   // this will ensure effective video decoding
-                  // console.log('adjust currentTime to nextBufferStart');
+                  console.log('main seek currentTime/nextBufferStart/duration:', currentTime, '/', nextBufferStart, '/', media.duration);
                   media.currentTime = nextBufferStart;
-                  this.seekState = 3;
-                  return;
                 }
               }
             }
-            if (readyState < 3 && this.seekState !== 1 && this.seekState !== 3) {
+            /*if (readyState < 3 && this.seekState !== 1 && this.seekState !== 3) {
               currentTime = media.currentTime;
               // bufferInfo = this.bufferInfo(currentTime,0);
-              // console.log('self.state : '+ this.state);
-              // console.log('readyState : '+ readyState);
-              // console.log('this.seekState : '+ this.seekState);
+              //console.log('readyState : '+ readyState);
+              //console.log('this.seekState : '+ this.seekState);
               if (!media.paused) {
-                this._seekSmall();
+               this._seekSmall();
+              }
+            }*/
+
+            /*if (readyState === 1 && !media.seeking) {
+              console.log('not start seek 0.05');
+              this._seekSmall(0.05);
+            }
+              if (readyState === 2 && !media.seeking) {
+              if (media.duration - currentTime < 2) {
+                return;
+              }
+                if (bufferInfo.len >=1) {
+                console.log('don\'t play buffer >=1 seek 0.1');
+                this._seekSmall(0.1);
+              } else {
+                if (delta < 2) {
+                    if (currentTime + delta < media.duration) {
+                    console.log('don\'t play buffer < 1 seek to next start: ', delta);
+                    //if (media.duration -
+                    this._seekSmall(delta);  
+                  } 
+                }
               }
             }
+              if (media.seeking && this.seekState === 2) {
+              console.log('seek slowly seek 0.2');
+              if (media.duration - currentTime < 0.2) {
+                media.currentTime = media.duration;
+              } else {
+                this._seekSmall(0.2);
+              }
+            }*/
           }
         }
-
-        
       }
     }
   }, {
     key: '_stateSeekLow',
     value: function _stateSeekLow() {
-      if (this.seekState === 1 || this.seekState === 3) {
+      if (this.seekState) {
         this.seekState = 2;
       }
     }
@@ -2127,17 +2155,19 @@ var MSEMediaController = (function (_EventHandler) {
       var second = arguments.length <= 0 || arguments[0] === undefined ? 0.1 : arguments[0];
 
       var self = this;
+
       if (!this.seekSmall && self.state === State.IDLE) {
         self.seekSmall = setTimeout(function () {
           var media = self.media;
           var currentTime = media.currentTime;
           if (self.state === State.IDLE && media.readyState < 3) {
             media.currentTime = currentTime + second;
-            // console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
-            self.seekState = 3;
-          };
+            console.log('readyState : ' + media.readyState);
+            console.log('this.seekState : ' + self.seekState);
+            console.log('seek small currentTime from ' + currentTime + ' to ' + (currentTime + second));
+          }
           self.seekSmall = null;
-        }, 100);
+        }, 1);
       }
     }
   }, {
