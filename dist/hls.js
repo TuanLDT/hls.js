@@ -1149,7 +1149,7 @@ var MSEMediaController = (function (_EventHandler) {
                 this.startFragmentRequested = true;
                 hls.trigger(_events2['default'].FRAG_LOADING, { frag: _frag });
                 this.state = State.FRAG_LOADING;
-                // console.log('State.FRAG_LOADING');
+                // //console.log('State.FRAG_LOADING');
               }
             }
           }
@@ -1214,7 +1214,7 @@ var MSEMediaController = (function (_EventHandler) {
           if (fragCurrent.level === 0) {
             fragCurrent.lost = true;
             this.state = State.IDLE;
-            console.log('Frage load error');
+            //console.log('Frage load error');
           }
           break;
         case State.PARSING:
@@ -1743,6 +1743,7 @@ var MSEMediaController = (function (_EventHandler) {
       // only adjust currentTime if not equal to 0
       if (!currentTime && currentTime !== this.startPosition) {
         _utilsLogger.logger.log('onMediaMetadata: adjust currentTime to startPosition');
+        //console.log('onMediaMetadata: adjust currentTime to startPosition');
         media.currentTime = this.startPosition;
       }
       this.loadedmetadata = true;
@@ -2007,7 +2008,7 @@ var MSEMediaController = (function (_EventHandler) {
         case _errors.ErrorDetails.LEVEL_LOAD_TIMEOUT:
         case _errors.ErrorDetails.KEY_LOAD_ERROR:
         case _errors.ErrorDetails.FRAG_PARSING_ERROR:
-          // console.log('handle FRAG_PARSING_ERROR');
+          // //console.log('handle FRAG_PARSING_ERROR');
           // flush everything
           this.flushBufferCounter = 0;
           this.flushRange.push({ start: 0, end: Number.POSITIVE_INFINITY });
@@ -2036,7 +2037,7 @@ var MSEMediaController = (function (_EventHandler) {
           this.fragLastKbps = Math.round(8 * stats.length / (stats.tbuffered - stats.tfirst));
           this.hls.trigger(_events2['default'].FRAG_BUFFERED, { stats: stats, frag: frag });
           _utilsLogger.logger.log('media buffered : ' + this.timeRangesToString(this.media.buffered));
-          // console.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
+          // //console.log(`media buffered : ${this.timeRangesToString(this.media.buffered)}`);
           this.state = State.IDLE;
         }
       }
@@ -2045,24 +2046,27 @@ var MSEMediaController = (function (_EventHandler) {
   }, {
     key: '_checkBuffer',
     value: function _checkBuffer() {
+      var self = this;
       var media = this.media;
-      var currentTime;
+
       var bufferInfo;
 
       if (media) {
         // compare readyState
         var readyState = media.readyState;
+        var currentTime = media.currentTime;
+        var duration = media.duration;
         // if ready state different from HAVE_NOTHING (numeric value 0), we are allowed to seek
         if (readyState) {
           // if seek after buffered defined, let's seek if within acceptable range
           var seekAfterBuffered = this.seekAfterBuffered;
           if (seekAfterBuffered) {
-            if (media.duration >= seekAfterBuffered) {
-              media.currentTime = seekAfterBuffered;
+            if (duration >= seekAfterBuffered) {
+              currentTime = seekAfterBuffered;
+              //console.log('seekAfterBuffered ');
               this.seekAfterBuffered = undefined;
             }
           } else {
-            currentTime = media.currentTime;
             bufferInfo = this.bufferInfo(currentTime, 0);
             var isPlaying = !(media.paused || media.ended || media.seeking || readyState < 3),
                 jumpThreshold = 1,
@@ -2072,6 +2076,8 @@ var MSEMediaController = (function (_EventHandler) {
               this.stalled = false;
             }
 
+            var nextBufferStart = bufferInfo.nextStart,
+                delta = nextBufferStart - currentTime;
             // check buffer upfront
             // if less than 200ms is buffered, and media is playing but playhead is not moving,
             // and we have a new buffer range available upfront, let's seek to that one
@@ -2089,12 +2095,11 @@ var MSEMediaController = (function (_EventHandler) {
               // if we are below threshold, try to jump if next buffer range is close
               if (bufferInfo.len <= jumpThreshold) {
                 // no buffer available @ currentTime, check if next buffer is close (more than 5ms diff but within a config.maxSeekHole second range)
-                var nextBufferStart = bufferInfo.nextStart,
-                    delta = nextBufferStart - currentTime;
+
                 if (nextBufferStart && delta < this.config.maxSeekHole && delta > 0.005) {
                   // next buffer is close ! adjust currentTime to nextBufferStart
                   // this will ensure effective video decoding
-                  console.log('main seek currentTime/nextBufferStart/duration:', currentTime, '/', nextBufferStart, '/', media.duration);
+                  //console.log('main seek currentTime/nextBufferStart/duration:', currentTime, '/',nextBufferStart,'/', duration);
                   media.currentTime = nextBufferStart;
                 }
               }
@@ -2109,35 +2114,40 @@ var MSEMediaController = (function (_EventHandler) {
               }
             }*/
 
-            /*if (readyState === 1 && !media.seeking) {
-              console.log('not start seek 0.05');
+            if (readyState === 1 && !media.seeking) {
+              //console.log('not start seek 0.05');
               this._seekSmall(0.05);
             }
-              if (readyState === 2 && !media.seeking) {
-              if (media.duration - currentTime < 2) {
-                return;
-              }
-                if (bufferInfo.len >=1) {
-                console.log('don\'t play buffer >=1 seek 0.1');
+
+            if (readyState === 2 && !media.seeking) {
+              if (currentTime !== duration) {
                 this._seekSmall(0.1);
-              } else {
-                if (delta < 2) {
-                    if (currentTime + delta < media.duration) {
-                    console.log('don\'t play buffer < 1 seek to next start: ', delta);
-                    //if (media.duration -
-                    this._seekSmall(delta);  
-                  } 
-                }
               }
             }
-              if (media.seeking && this.seekState === 2) {
-              console.log('seek slowly seek 0.2');
-              if (media.duration - currentTime < 0.2) {
-                media.currentTime = media.duration;
+
+            if (media.seeking && this.seekState === 2) {
+              //console.log('seek slowly seek 0.2');
+              if (duration - currentTime < 1) {
+                media.currentTime = duration;
               } else {
                 this._seekSmall(0.2);
               }
-            }*/
+            }
+
+            if (isPlaying && self.isBuffered(currentTime)) {
+              if (this.flagCurrentTime !== currentTime) {
+                this.flagCurrentTime = currentTime;
+
+                clearTimeout(this.checkPlayingTimeout);
+                this.checkPlayingTimeout = null;
+              }
+
+              if (!this.checkPlayingTimeout) {
+                this.checkPlayingTimeout = setTimeout(function () {
+                  self._seekSmall(0.05);
+                }, 3000);
+              }
+            }
           }
         }
       }
@@ -2156,16 +2166,32 @@ var MSEMediaController = (function (_EventHandler) {
 
       var self = this;
 
-      if (!this.seekSmall && self.state === State.IDLE) {
+      /* ERROR : -2,
+       STARTING : -1,
+       IDLE : 0,
+       KEY_LOADING : 1,
+       FRAG_LOADING : 2,
+       FRAG_LOADING_WAITING_RETRY : 3,
+       WAITING_LEVEL : 4,
+       PARSING : 5,
+       PARSED : 6,
+       APPENDING : 7,
+       BUFFER_FLUSHING : 8*/
+
+      if (!this.seekSmall && !/1|2|5|7|8/.test(self.state)) {
         self.seekSmall = setTimeout(function () {
           var media = self.media;
           var currentTime = media.currentTime;
-          if (self.state === State.IDLE && media.readyState < 3) {
-            media.currentTime = currentTime + second;
-            console.log('readyState : ' + media.readyState);
-            console.log('this.seekState : ' + self.seekState);
-            console.log('seek small currentTime from ' + currentTime + ' to ' + (currentTime + second));
+
+          if (currentTime + second > media.duration) {
+            second = media.duration - currentTime;
           }
+
+          media.currentTime = currentTime + second;
+          //console.log('readyState : '+ media.readyState);
+          //console.log('this.seekState : '+ self.seekState);
+          //console.log(`seek small currentTime from ${currentTime} to ${currentTime + second}`);
+
           self.seekSmall = null;
         }, 1);
       }
