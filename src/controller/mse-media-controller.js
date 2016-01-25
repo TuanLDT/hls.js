@@ -1262,7 +1262,7 @@ _checkBuffer() {
                  (delta > 0.005)) {
                 // next buffer is close ! adjust currentTime to nextBufferStart
                 // this will ensure effective video decoding
-                //console.log('main seek currentTime/nextBufferStart/duration:', currentTime, '/',nextBufferStart,'/', duration);
+                // console.log('main seek currentTime/nextBufferStart/duration:', currentTime, '/',nextBufferStart,'/', duration);
                 media.currentTime = nextBufferStart;
               }
             }
@@ -1277,19 +1277,19 @@ _checkBuffer() {
             }
           }*/
 
-          if (readyState === 1 && !media.seeking) {
-            //console.log('not start seek 0.05');
+          if (readyState === 1 && !media.seeking && !media.paused) {
+            // console.log('not start seek 0.05');
             this._seekSmall(0.05);
           }
 
-          if (readyState === 2 && !media.seeking) {
+          if (readyState === 2 && !media.seeking && !media.paused) {
             if (currentTime !== duration) {
               this._seekSmall(0.1);  
             }
           }
 
           if (media.seeking && this.seekState === 2) {
-            //console.log('seek slowly seek 0.2');
+            // console.log('seek slowly seek 0.2');
             if (duration - currentTime < 1) {
               media.currentTime = duration;
             } else {
@@ -1307,7 +1307,7 @@ _checkBuffer() {
 
             if (!this.checkPlayingTimeout) {
               this.checkPlayingTimeout = setTimeout(function() {
-                self._seekSmall(0.05);
+                if (!media.paused) self._seekSmall(0.05);
               }, 3000);
             }
           }
